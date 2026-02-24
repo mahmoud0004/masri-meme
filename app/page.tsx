@@ -1,92 +1,70 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { detectEmotions } from "@/lib/emotions";
-import { translateMeme } from "@/lib/translations";
+import { translateMeme, getEmotionFromDictionary } from "@/lib/translations";
 import { extractTextFromFile } from "@/lib/ocr";
+import type { EmotionResult } from "@/lib/emotions";
+import type { TranslationResult } from "@/lib/translations";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
 type Tab = "text" | "voice" | "media";
 
-type EmotionResult = {
-  primary: string;
-  secondary?: string;
-  percentages: Record<string, number>;
-  intensity: 1 | 2 | 3 | 4 | 5;
-  sentiment: "positive" | "neutral" | "negative";
-};
-
-type TranslationResult = {
-  original: string;
-  translation: string;
-  explanation: string;
-  tone: string;
-};
-
-// ─── Emotion metadata ─────────────────────────────────────────────────────────
 const EMOTION_META: Record<string, { emoji: string; color: string }> = {
-  فرحان:          { emoji: "😄", color: "#FFD700" },
-  غاضب:           { emoji: "😤", color: "#FF4444" },
-  زعلان:          { emoji: "😢", color: "#6B8CFF" },
-  ساخر:           { emoji: "😏", color: "#FF8C42" },
-  متحمس:          { emoji: "🤩", color: "#00E5A0" },
-  متضايق:         { emoji: "😒", color: "#C084FC" },
-  خايف:           { emoji: "😰", color: "#94A3B8" },
-  مبسوط:          { emoji: "😂", color: "#FB923C" },
-  neutral:        { emoji: "😐", color: "#888888" },
+  فرحان:   { emoji: "😄", color: "#FFD700" },
+  غاضب:    { emoji: "😤", color: "#FF4444" },
+  زعلان:   { emoji: "😢", color: "#6B8CFF" },
+  ساخر:    { emoji: "😏", color: "#FF8C42" },
+  متحمس:   { emoji: "🤩", color: "#00E5A0" },
+  متضايق:  { emoji: "😒", color: "#C084FC" },
+  خايف:    { emoji: "😰", color: "#94A3B8" },
+  مبسوط:   { emoji: "😂", color: "#FB923C" },
 };
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-function clsx(...classes: (string | false | null | undefined)[]) {
-  return classes.filter(Boolean).join(" ");
-}
+const TONE_COLORS: Record<string, string> = {
+  سخرية: "#FF8C42",
+  غضب:   "#FF4444",
+  فرح:   "#FFD700",
+  حب:    "#F472B6",
+  تحمس:  "#00E5A0",
+  حزن:   "#6B8CFF",
+  تعجب:  "#A78BFA",
+  عادي:  "#94A3B8",
+};
 
-function TabButton({ id, label, icon, active, onClick }: {
-  id: Tab; label: string; icon: string; active: boolean; onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={clsx(
-        "flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-semibold transition-all duration-200",
-        active
-          ? "bg-violet-600 text-white shadow-lg shadow-violet-500/30"
-          : "bg-white/5 text-white/60 hover:bg-white/10 hover:text-white border border-white/10"
-      )}
-    >
-      <span>{icon}</span>
-      <span>{label}</span>
-    </button>
-  );
-}
+const EXAMPLES = [
+  "متعملش فيها ناصح",
+  "إيه ده يسطا",
+  "أنا اتخنقت",
+  "يا روح قلبي",
+  "ده أنا مبسوطه",
+  "كسرت بخاطري",
+  "يا عم ده اكتشاف",
+  "حاجة تجنن",
+];
 
 function Spinner() {
   return (
-    <div className="w-5 h-5 rounded-full border-2 border-white/20 border-t-violet-400 animate-spin" />
+    <div className="w-5 h-5 rounded-full border-2 border-white/15 border-t-violet-400 animate-spin flex-shrink-0" />
   );
 }
 
 function WaveViz({ active }: { active: boolean }) {
   return (
-    <div className="flex items-center justify-center gap-1 h-12">
-      {[...Array(12)].map((_, i) => (
+    <div className="flex items-center justify-center gap-[3px] h-10 my-3">
+      {[...Array(14)].map((_, i) => (
         <div
           key={i}
-          className="w-1 rounded-full bg-violet-400 transition-all"
+          className="w-[3px] rounded-full transition-all duration-150"
           style={{
-            height: active ? `${20 + Math.random() * 24}px` : "4px",
-            opacity: active ? 1 : 0.3,
-            animation: active ? `waveBar 0.6s ease-in-out ${i * 0.05}s infinite alternate` : "none",
+            background: active ? "#a78bfa" : "rgba(167,139,250,.2)",
+            height: active ? `${10 + ((i * 7 + 5) % 24)}px` : "3px",
+            animation: active
+              ? `waveBar .7s ease-in-out ${i * 0.055}s infinite alternate`
+              : "none",
           }}
         />
       ))}
-      <style>{`
-        @keyframes waveBar {
-          from { transform: scaleY(0.3); }
-          to   { transform: scaleY(1); }
-        }
-      `}</style>
     </div>
   );
 }
@@ -95,20 +73,20 @@ function EmotionBar({ label, value, color, emoji }: {
   label: string; value: number; color: string; emoji: string;
 }) {
   return (
-    <div className="flex items-center gap-3">
-      <span className="text-lg w-7 text-center">{emoji}</span>
-      <div className="flex-1">
+    <div className="flex items-center gap-3 mb-2.5">
+      <span className="text-lg w-6 text-center flex-shrink-0">{emoji}</span>
+      <div className="flex-1 min-w-0">
         <div className="flex justify-between mb-1">
-          <span className="text-xs text-white/70 font-medium">{label}</span>
-          <span className="text-xs font-bold" style={{ color }}>{value}%</span>
+          <span className="text-xs text-white/55 font-semibold">{label}</span>
+          <span className="text-xs font-black tabular-nums" style={{ color }}>{value}%</span>
         </div>
-        <div className="h-2 bg-white/5 rounded-full overflow-hidden">
+        <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
           <motion.div
             initial={{ width: 0 }}
             animate={{ width: `${value}%` }}
-            transition={{ duration: 1, ease: "easeOut", delay: 0.1 }}
+            transition={{ duration: 1.1, ease: [0.22, 1, 0.36, 1], delay: 0.05 }}
             className="h-full rounded-full"
-            style={{ background: `linear-gradient(90deg, ${color}88, ${color})` }}
+            style={{ background: `linear-gradient(90deg, ${color}50, ${color})` }}
           />
         </div>
       </div>
@@ -116,332 +94,304 @@ function EmotionBar({ label, value, color, emoji }: {
   );
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
 export default function Home() {
   const [tab, setTab] = useState<Tab>("text");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Text
-  const [textInput, setTextInput] = useState("");
+  // text
+  const [txt, setTxt] = useState("");
 
-  // Voice
-  const [voiceState, setVoiceState] = useState<"idle" | "recording" | "done">("idle");
-  const [voiceTranscript, setVoiceTranscript] = useState("");
-  const [micPermission, setMicPermission] = useState<"unknown" | "granted" | "denied">("unknown");
-  const recognitionRef = useRef<any>(null);
-  const micStreamRef = useRef<MediaStream | null>(null);
+  // voice
+  const [vState, setVState] = useState<"idle" | "rec" | "done">("idle");
+  const [vText, setVText] = useState("");
+  const [micPerm, setMicPerm] = useState<"unknown" | "granted" | "denied">("unknown");
+  const recRef = useRef<any>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
-  // Media
-  const [mediaFile, setMediaFile] = useState<File | null>(null);
-  const [mediaPreview, setMediaPreview] = useState<string | null>(null);
-  const [mediaB64, setMediaB64] = useState<string | null>(null);
-  const [mediaMime, setMediaMime] = useState<string | null>(null);
-  const [mediaExtracted, setMediaExtracted] = useState("");
+  // media
+  const [mFile, setMFile] = useState<File | null>(null);
+  const [mUrl, setMUrl] = useState<string | null>(null);
+  const [mExtracted, setMExtracted] = useState("");
   const [drag, setDrag] = useState(false);
 
-  // Results
-  const [translation, setTranslation] = useState<TranslationResult | null>(null);
-  const [emotion, setEmotion] = useState<EmotionResult | null>(null);
+  // results
+  const [trans, setTrans] = useState<TranslationResult | null>(null);
+  const [emo, setEmo] = useState<EmotionResult | null>(null);
 
-  // Check mic permission on mount
   useEffect(() => {
-    if (typeof navigator === "undefined") return;
     navigator.permissions
       ?.query({ name: "microphone" as PermissionName })
       .then((s) => {
-        setMicPermission(s.state === "granted" ? "granted" : s.state === "denied" ? "denied" : "unknown");
+        setMicPerm(s.state === "granted" ? "granted" : s.state === "denied" ? "denied" : "unknown");
         s.onchange = () =>
-          setMicPermission(s.state === "granted" ? "granted" : s.state === "denied" ? "denied" : "unknown");
+          setMicPerm(s.state === "granted" ? "granted" : s.state === "denied" ? "denied" : "unknown");
       })
       .catch(() => {});
   }, []);
 
-  // ── Process any text input ──────────────────────────────────────────────────
-  async function processText(input: string) {
-    if (!input.trim()) { setError("من فضلك أدخل نص أو ميم أولاً"); return; }
+  // ── process ──────────────────────────────────────────────────────────────────
+  function process(input: string) {
+    if (!input.trim()) { setError("من فضلك أدخل نص أولاً"); return; }
     setLoading(true);
     setError(null);
-    setTranslation(null);
-    setEmotion(null);
+    setTrans(null);
+    setEmo(null);
 
-    try {
-      const [trans, emo] = await Promise.all([
-        translateMeme(input),
-        detectEmotions(input),
-      ]);
-      setTranslation(trans);
-      setEmotion(emo);
-    } catch (e: any) {
-      setError(e?.message ?? "حصل خطأ، جرب تاني");
-    } finally {
+    setTimeout(() => {
+      try {
+        const t = translateMeme(input);
+        const e = t.found
+          ? getEmotionFromDictionary(input)
+          : detectEmotions(input);
+        setTrans(t);
+        setEmo(e);
+      } catch (err: any) {
+        setError(err?.message ?? "حصل خطأ");
+      }
       setLoading(false);
-    }
+    }, 500);
   }
 
-  // ── Voice ───────────────────────────────────────────────────────────────────
+  // ── voice ─────────────────────────────────────────────────────────────────────
   async function startVoice() {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) { setError("المتصفح مش بيدعم التعرف على الصوت، استخدم Chrome أو Edge"); return; }
+    if (!SR) { setError("المتصفح مش بيدعم الصوت — استخدم Chrome أو Edge"); return; }
+    setError(null); setTrans(null); setEmo(null); setVText("");
 
-    setError(null);
-    setTranslation(null);
-    setEmotion(null);
-    setVoiceTranscript("");
-
-    // Request mic permission explicitly first
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      micStreamRef.current = stream;
-      setMicPermission("granted");
+      streamRef.current = stream;
+      setMicPerm("granted");
     } catch (err: any) {
-      setMicPermission("denied");
-      if (err?.name === "NotAllowedError" || err?.name === "PermissionDeniedError") {
-        setError("الميكروفون محجوب — اضغط على أيقونة القفل في المتصفح وسمح بالميكروفون");
-      } else if (err?.name === "NotFoundError") {
-        setError("مفيش ميكروفون على الجهاز ده");
-      } else {
-        setError("مش قادر يوصل للميكروفون: " + (err?.message ?? "خطأ غير معروف"));
-      }
+      setMicPerm("denied");
+      setError(
+        err?.name === "NotAllowedError"
+          ? "الميكروفون محجوب — اضغط أيقونة القفل في المتصفح واسمح"
+          : err?.name === "NotFoundError"
+          ? "مفيش ميكروفون على الجهاز ده"
+          : "مش قادر يوصل للميكروفون: " + (err?.message ?? "")
+      );
       return;
     }
 
-    // Fresh instance every time to avoid stale handler bugs
     const rec = new SR();
-    recognitionRef.current = rec;
+    recRef.current = rec;
     rec.lang = "ar-EG";
     rec.continuous = false;
     rec.interimResults = true;
     rec.maxAlternatives = 1;
-
-    setVoiceState("recording");
+    setVState("rec");
 
     rec.onresult = (event: any) => {
       let t = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) t += event.results[i][0].transcript;
-      if (t.trim()) setVoiceTranscript(t);
+      for (let i = event.resultIndex; i < event.results.length; i++)
+        t += event.results[i][0].transcript;
+      if (t.trim()) setVText(t);
     };
 
     rec.onerror = (event: any) => {
       const msgs: Record<string, string> = {
-        "not-allowed": "الميكروفون محجوب — سمح بالميكروفون من إعدادات المتصفح",
+        "not-allowed": "الميكروفون محجوب — سمح من إعدادات المتصفح",
         "no-speech": "مسمعتش صوت، جرب تاني",
         "audio-capture": "الميكروفون شغال مع تطبيق تاني",
         "network": "خطأ في الشبكة",
-        "aborted": "وقف التسجيل",
       };
-      setError(msgs[event.error] ?? `خطأ صوتي: ${event.error}`);
-      setVoiceState("idle");
-      stopMicStream();
+      setError(msgs[event.error] ?? `خطأ: ${event.error}`);
+      setVState("idle");
+      stopStream();
     };
 
-    rec.onend = () => {
-      setVoiceState("done");
-      stopMicStream();
-    };
+    rec.onend = () => { setVState("done"); stopStream(); };
 
-    try {
-      rec.start();
-    } catch (e: any) {
-      setError("فشل بدء التسجيل: " + (e?.message ?? "خطأ غير معروف"));
-      setVoiceState("idle");
-      stopMicStream();
+    try { rec.start(); } catch (err: any) {
+      setError("فشل التسجيل: " + (err?.message ?? ""));
+      setVState("idle");
+      stopStream();
     }
   }
 
-  function stopVoice() {
-    recognitionRef.current?.stop();
-    stopMicStream();
-    setVoiceState("done");
+  function stopVoice() { recRef.current?.stop(); stopStream(); setVState("done"); }
+  function stopStream() {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
   }
 
-  function stopMicStream() {
-    micStreamRef.current?.getTracks().forEach((t) => t.stop());
-    micStreamRef.current = null;
-  }
-
-  // ── Media ───────────────────────────────────────────────────────────────────
-  function handleFileInput(file: File | null) {
+  // ── media ─────────────────────────────────────────────────────────────────────
+  function loadFile(file: File | null) {
     if (!file) return;
     if (file.size > 15 * 1024 * 1024) { setError("الملف أكبر من 15MB"); return; }
-    const isImg = file.type.startsWith("image/");
-    setMediaFile(file);
-    setMediaPreview(URL.createObjectURL(file));
-    setMediaExtracted("");
-    setTranslation(null);
-    setEmotion(null);
-    setError(null);
-
-    if (isImg) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        setMediaB64((e.target?.result as string).split(",")[1]);
-        setMediaMime(file.type);
-      };
-      reader.readAsDataURL(file);
-    } else {
-      setMediaB64(null);
-      setMediaMime(null);
+    if (!file.type.startsWith("image/")) {
+      setError("ارفع صورة بس — الفيديو مش متدعوم في النسخة دي");
+      return;
     }
+    setMFile(file);
+    setMUrl(URL.createObjectURL(file));
+    setMExtracted("");
+    setTrans(null);
+    setEmo(null);
+    setError(null);
   }
 
   async function processMedia() {
-    if (!mediaFile) { setError("ارفع صورة أو فيديو أولاً"); return; }
+    if (!mFile) { setError("ارفع صورة أولاً"); return; }
     setLoading(true);
     setError(null);
-    setTranslation(null);
-    setEmotion(null);
-    setMediaExtracted("");
+    setTrans(null);
+    setEmo(null);
+    setMExtracted("");
 
     try {
-      let extracted = "";
-      if (mediaFile.type.startsWith("image/") && mediaB64) {
-        // Use Claude vision for images
-        const { translateMemeFromImage } = await import("@/lib/translations");
-        const result = await translateMemeFromImage(mediaB64, mediaFile.type);
-        setTranslation(result.translation);
-        setEmotion(result.emotion);
-        setMediaExtracted(result.extractedText);
-        setLoading(false);
-        return;
-      } else {
-        // OCR for video
-        extracted = await extractTextFromFile(mediaFile);
-        if (!extracted.trim()) throw new Error("مش لاقي نص في الفيديو ده");
-        setMediaExtracted(extracted);
-        await Promise.all([
-          translateMeme(extracted).then(setTranslation),
-          detectEmotions(extracted).then(setEmotion),
-        ]);
-      }
-    } catch (e: any) {
-      setError(e?.message ?? "فشل تحليل الملف");
-    } finally {
-      setLoading(false);
+      const extracted = await extractTextFromFile(mFile);
+      if (!extracted.trim()) throw new Error("مش لاقي نص في الصورة — جرب صورة أوضح");
+      setMExtracted(extracted);
+      const t = translateMeme(extracted);
+      const e = t.found ? getEmotionFromDictionary(extracted) : detectEmotions(extracted);
+      setTrans(t);
+      setEmo(e);
+    } catch (err: any) {
+      setError(err?.message ?? "فشل تحليل الصورة");
     }
+    setLoading(false);
   }
 
-  // ─── JSX ─────────────────────────────────────────────────────────────────────
+  // ── helpers ───────────────────────────────────────────────────────────────────
+  const primMeta = emo ? (EMOTION_META[emo.primary] ?? { emoji: "🎭", color: "#888" }) : null;
+  const toneColor = trans ? (TONE_COLORS[trans.tone] ?? "#94A3B8") : "#94A3B8";
+
+  const tabCls = (id: Tab) =>
+    `flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-bold transition-all duration-200 ${
+      tab === id
+        ? "bg-violet-600 text-white shadow-lg shadow-violet-500/30"
+        : "bg-white/4 text-white/45 hover:bg-white/8 hover:text-white border border-white/8"
+    }`;
+
+  // ── JSX ───────────────────────────────────────────────────────────────────────
   return (
     <main className="min-h-screen bg-[#0A0A0F] text-white" dir="rtl">
-      {/* Ambient background */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        <div className="absolute top-[-20%] left-[10%] w-[600px] h-[600px] rounded-full bg-violet-600/10 blur-[120px]" />
-        <div className="absolute bottom-[-10%] right-[5%] w-[500px] h-[500px] rounded-full bg-fuchsia-600/8 blur-[120px]" />
-        <div className="absolute top-[40%] right-[30%] w-[300px] h-[300px] rounded-full bg-blue-600/8 blur-[100px]" />
+      <style>{`
+        @keyframes waveBar { from { transform:scaleY(.3); } to { transform:scaleY(1); } }
+        @keyframes shimmer { 100% { transform:translateX(200%); } }
+        textarea:focus { outline:none; border-color:rgba(124,58,237,.5) !important; }
+      `}</style>
+
+      {/* Ambient */}
+      <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden">
+        <div className="absolute -top-40 left-8 w-[500px] h-[500px] rounded-full bg-violet-600/10 blur-[110px]" />
+        <div className="absolute bottom-0 right-0 w-[400px] h-[400px] rounded-full bg-fuchsia-600/8 blur-[100px]" />
       </div>
 
-      <div className="relative max-w-3xl mx-auto px-4 py-10">
+      <div className="max-w-xl mx-auto px-4 py-10 pb-16">
 
         {/* Header */}
         <motion.div
-          initial={{ opacity: 0, y: -16 }}
+          initial={{ opacity: 0, y: -14 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
-          className="text-center mb-10"
+          className="text-center mb-9"
         >
-          <div className="inline-flex items-center gap-2 bg-violet-500/10 border border-violet-500/20 rounded-full px-4 py-1.5 text-xs text-violet-300 mb-4">
+          <div className="inline-flex items-center gap-2 bg-violet-500/10 border border-violet-500/20 rounded-full px-4 py-1.5 text-[11px] text-violet-300 mb-4 font-bold tracking-wide">
             <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse" />
-            مجاني 100% — بدون API
+            مجاني 100% · بدون API · بدون إنترنت
           </div>
-
-          <h1 className="text-4xl md:text-5xl font-black mb-3 leading-tight">
+          <h1 className="text-[clamp(2rem,8vw,2.8rem)] font-black leading-[1.1] mb-3">
             <span className="text-white">مترجم </span>
-            <span className="text-transparent bg-clip-text bg-gradient-to-l from-violet-400 to-fuchsia-400">
+            <span className="bg-gradient-to-l from-violet-400 to-fuchsia-400 text-transparent bg-clip-text">
               الميمز المصرية
             </span>
           </h1>
-
-          <p className="text-white/50 text-base max-w-md mx-auto leading-relaxed">
-            ترجمة ذكية للهجة المصرية — مش ترجمة حرفية. نص أو صوت أو صور أو فيديو.
+          <p className="text-white/40 text-sm leading-relaxed max-w-xs mx-auto">
+            ترجمة ذكية للهجة المصرية — نص أو صوت أو صور
             <br />
-            <span className="text-violet-400">+ تحليل المشاعر بالنسبة المئوية من النبرة الصوتية</span>
+            <span className="text-violet-400">+ تحليل المشاعر بالنسبة المئوية 🧠</span>
           </p>
         </motion.div>
 
         {/* Tabs */}
-        <div className="flex items-center justify-center gap-2 mb-8 flex-wrap">
-          <TabButton id="text"  label="نص"         icon="✍️"  active={tab === "text"}  onClick={() => setTab("text")} />
-          <TabButton id="voice" label="صوت"         icon="🎤"  active={tab === "voice"} onClick={() => setTab("voice")} />
-          <TabButton id="media" label="صورة / فيديو" icon="🖼️" active={tab === "media"} onClick={() => setTab("media")} />
+        <div className="flex justify-center gap-2 mb-5 flex-wrap">
+          <button className={tabCls("text")}  onClick={() => setTab("text")} >✍️ نص</button>
+          <button className={tabCls("voice")} onClick={() => setTab("voice")}>🎤 صوت</button>
+          <button className={tabCls("media")} onClick={() => setTab("media")}>🖼️ صورة</button>
         </div>
 
-        {/* Input Card */}
+        {/* Input card */}
         <motion.div
           layout
-          className="bg-[#111118] border border-white/8 rounded-2xl p-5 mb-4 shadow-xl shadow-black/40"
+          className="bg-[#111118] border border-white/7 rounded-2xl p-5 mb-3 shadow-2xl shadow-black/50"
         >
           <AnimatePresence mode="wait">
 
-            {/* ── TEXT ── */}
+            {/* TEXT */}
             {tab === "text" && (
-              <motion.div key="text" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}>
-                <label className="block text-xs text-white/40 mb-2 font-medium">اكتب الميم أو العبارة المصرية</label>
+              <motion.div key="text" initial={{ opacity:0, y:8 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0 }}>
+                <p className="text-[11px] text-white/30 font-bold tracking-wider mb-2">اكتب الميم أو العبارة المصرية</p>
                 <textarea
-                  value={textInput}
-                  onChange={(e) => setTextInput(e.target.value)}
-                  placeholder={'مثال: "متعملش فيها ناصح" أو "إنت بتستهبل؟" أو "يا عم ده اكتشاف!"'}
+                  value={txt}
+                  onChange={(e) => setTxt(e.target.value)}
+                  onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") process(txt); }}
+                  placeholder={"مثال: \"متعملش فيها ناصح\"\nأو: \"إيه ده يسطا!\"\nأو: \"أنا اتخنقت\""}
                   rows={4}
-                  className="w-full bg-black/30 border border-white/8 rounded-xl p-4 text-white placeholder-white/25 resize-none outline-none focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/30 text-base leading-relaxed transition-all"
+                  className="w-full bg-black/25 border border-white/7 rounded-xl p-4 text-white placeholder-white/18 resize-none text-[15px] leading-relaxed transition-colors font-[inherit]"
                 />
-
-                {/* Example chips */}
-                <div className="flex gap-2 flex-wrap mt-3">
-                  {["متعملش فيها ناصح", "إيه ده يسطا!", "ده أنا مبسوطه", "يا عم بلاش كده"].map((ex) => (
+                <div className="flex gap-1.5 flex-wrap mt-3">
+                  {EXAMPLES.map((ex) => (
                     <button
                       key={ex}
-                      onClick={() => setTextInput(ex)}
-                      className="text-xs bg-white/5 border border-white/10 hover:border-violet-500/40 hover:bg-violet-500/10 px-3 py-1.5 rounded-full text-white/60 hover:text-violet-300 transition-all"
+                      onClick={() => setTxt(ex)}
+                      className="text-[11px] bg-white/3 border border-white/7 hover:border-violet-500/40 hover:bg-violet-500/10 hover:text-violet-300 px-2.5 py-1 rounded-full text-white/40 transition-all"
                     >
                       {ex}
                     </button>
                   ))}
                 </div>
-
                 <div className="flex gap-2 mt-4">
-                  <button onClick={() => setTextInput("")} className="px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm text-white/60 hover:bg-white/10 transition-all">
+                  <button
+                    onClick={() => setTxt("")}
+                    className="px-4 py-2.5 rounded-xl bg-white/4 border border-white/7 text-sm text-white/45 hover:bg-white/7 transition-all font-semibold"
+                  >
                     مسح
                   </button>
                   <button
-                    onClick={() => processText(textInput)}
+                    onClick={() => process(txt)}
                     disabled={loading}
-                    className="mr-auto px-6 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-sm font-bold text-white transition-all flex items-center gap-2 shadow-lg shadow-violet-500/25"
+                    className="mr-auto flex items-center gap-2 px-6 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-sm font-black shadow-lg shadow-violet-500/25 transition-all"
                   >
                     {loading ? <Spinner /> : "✨"}
                     {loading ? "بيترجم..." : "ترجم الميم"}
                   </button>
                 </div>
+                <p className="text-center text-[10px] text-white/15 mt-2">Ctrl + Enter</p>
               </motion.div>
             )}
 
-            {/* ── VOICE ── */}
+            {/* VOICE */}
             {tab === "voice" && (
-              <motion.div key="voice" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}>
-                <p className="text-sm text-white/50 mb-4 text-center leading-relaxed">
-                  اتكلم بالعربي المصري — هيترجم ويحلل مشاعرك من نبرة صوتك
+              <motion.div key="voice" initial={{ opacity:0, y:8 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0 }}>
+                <p className="text-sm text-white/40 text-center mb-4 leading-relaxed">
+                  اتكلم بالعربي المصري — هيترجم ويحلل مشاعرك
                   <br />
                   <span className="text-violet-400 text-xs">المتصفح هيطلب إذن الميكروفون أول مرة</span>
                 </p>
 
-                {micPermission === "denied" && (
-                  <div className="mb-4 bg-amber-500/10 border border-amber-500/25 rounded-xl p-3 text-xs text-amber-200 text-center">
-                    🔒 الميكروفون محجوب — اضغط على أيقونة القفل في المتصفح واسمح بالميكروفون
+                {micPerm === "denied" && (
+                  <div className="mb-4 bg-amber-500/8 border border-amber-500/20 rounded-xl p-3 text-xs text-amber-200 text-center">
+                    🔒 الميكروفون محجوب — اضغط أيقونة القفل في المتصفح واسمح
                   </div>
                 )}
 
-                <WaveViz active={voiceState === "recording"} />
+                <WaveViz active={vState === "rec"} />
 
-                <p className={`text-center text-sm mt-2 mb-4 transition-colors ${voiceState === "recording" ? "text-red-400" : "text-white/40"}`}>
-                  {voiceState === "idle" && "اضغط الزر وابدأ الكلام"}
-                  {voiceState === "recording" && "🔴 بيسمعك... اتكلم"}
-                  {voiceState === "done" && "✅ خلصت — اضغط ترجم"}
+                <p className={`text-center text-sm my-3 font-bold transition-colors ${vState === "rec" ? "text-red-400" : "text-white/30"}`}>
+                  {vState === "idle" && "اضغط الزر وابدأ الكلام"}
+                  {vState === "rec"  && "🔴 بيسمعك... اتكلم"}
+                  {vState === "done" && "✅ خلصت — اضغط ترجم"}
                 </p>
 
-                <div className="flex gap-3 justify-center mb-4">
-                  {voiceState !== "recording" ? (
+                <div className="flex justify-center mb-5">
+                  {vState !== "rec" ? (
                     <button
                       onClick={startVoice}
-                      disabled={loading || micPermission === "denied"}
+                      disabled={loading || micPerm === "denied"}
                       className="w-16 h-16 rounded-full bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-2xl shadow-lg shadow-violet-500/30 transition-all hover:scale-105 active:scale-95"
                     >
                       🎤
@@ -456,29 +406,28 @@ export default function Home() {
                   )}
                 </div>
 
-                {voiceTranscript && (
-                  <div className="bg-black/30 border border-white/8 rounded-xl p-4 mb-4">
-                    <p className="text-xs text-white/40 mb-1">اللي اتسمع:</p>
-                    <p className="text-white text-base">{voiceTranscript}</p>
+                {vText && (
+                  <div className="bg-black/20 border border-white/7 rounded-xl p-4 mb-4">
+                    <p className="text-[11px] text-white/30 mb-1">اللي اتسمع:</p>
+                    <p className="text-white text-sm leading-relaxed">{vText}</p>
                   </div>
                 )}
 
-                {/* Type fallback */}
-                <div className="border-t border-white/8 pt-4 mt-2">
-                  <p className="text-xs text-white/30 mb-2 text-center">أو اكتب يدوي</p>
+                <div className="border-t border-white/7 pt-4">
+                  <p className="text-[11px] text-white/25 text-center mb-2">أو اكتب يدوي</p>
                   <textarea
-                    value={voiceTranscript}
-                    onChange={(e) => setVoiceTranscript(e.target.value)}
+                    value={vText}
+                    onChange={(e) => setVText(e.target.value)}
                     placeholder="اكتب هنا..."
                     rows={2}
-                    className="w-full bg-black/20 border border-white/8 rounded-xl p-3 text-white placeholder-white/20 resize-none outline-none focus:border-violet-500/50 text-sm transition-all"
+                    className="w-full bg-black/20 border border-white/7 rounded-xl p-3 text-white placeholder-white/18 resize-none text-sm transition-colors font-[inherit]"
                   />
                 </div>
 
                 <button
-                  onClick={() => processText(voiceTranscript)}
-                  disabled={loading || !voiceTranscript.trim()}
-                  className="w-full mt-4 py-3 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:opacity-40 font-bold text-sm flex items-center justify-center gap-2 transition-all shadow-lg shadow-violet-500/25"
+                  onClick={() => process(vText)}
+                  disabled={loading || !vText.trim()}
+                  className="w-full mt-4 py-3 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:opacity-40 font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-violet-500/25 transition-all"
                 >
                   {loading ? <Spinner /> : "🎭"}
                   {loading ? "بيحلل..." : "ترجم وحلل المشاعر"}
@@ -486,59 +435,54 @@ export default function Home() {
               </motion.div>
             )}
 
-            {/* ── MEDIA ── */}
+            {/* MEDIA */}
             {tab === "media" && (
-              <motion.div key="media" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}>
-                <p className="text-sm text-white/50 mb-4 text-center">
-                  ارفع صورة ميم أو فيديو — هيستخرج النص ويترجمه بالذكاء الاصطناعي
+              <motion.div key="media" initial={{ opacity:0, y:8 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0 }}>
+                <p className="text-sm text-white/40 text-center mb-4">
+                  ارفع صورة ميم — هيستخرج النص ويترجمه
                 </p>
 
-                {/* Drop zone */}
                 <div
                   onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
                   onDragLeave={() => setDrag(false)}
-                  onDrop={(e) => { e.preventDefault(); setDrag(false); handleFileInput(e.dataTransfer.files[0]); }}
-                  className={`relative border-2 border-dashed rounded-xl p-6 text-center transition-all cursor-pointer
-                    ${drag ? "border-violet-500 bg-violet-500/10" : "border-white/15 hover:border-violet-500/40 hover:bg-white/[0.02]"}`}
+                  onDrop={(e) => { e.preventDefault(); setDrag(false); loadFile(e.dataTransfer.files[0]); }}
+                  className={`relative border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all
+                    ${drag ? "border-violet-500 bg-violet-500/10" : "border-white/10 hover:border-violet-500/40 hover:bg-white/[0.015]"}`}
                 >
                   <input
                     type="file"
-                    accept="image/*,video/*"
+                    accept="image/*"
                     className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                    onChange={(e) => handleFileInput(e.target.files?.[0] ?? null)}
+                    onChange={(e) => loadFile(e.target.files?.[0] ?? null)}
                   />
-                  {mediaPreview ? (
+                  {mUrl ? (
                     <div className="space-y-2">
-                      {mediaFile?.type.startsWith("image/") ? (
-                        <img src={mediaPreview} alt="preview" className="max-h-48 mx-auto rounded-xl object-contain" />
-                      ) : (
-                        <video src={mediaPreview} controls className="max-h-48 mx-auto rounded-xl w-full" />
-                      )}
-                      <p className="text-xs text-white/40">{mediaFile?.name}</p>
+                      <img src={mUrl} alt="preview" className="max-h-44 mx-auto rounded-xl object-contain" />
+                      <p className="text-[11px] text-white/30">{mFile?.name}</p>
                     </div>
                   ) : (
-                    <div>
-                      <p className="text-3xl mb-2">📁</p>
-                      <p className="text-white/60 text-sm font-medium">اسحب الملف هنا أو اضغط لاختياره</p>
-                      <p className="text-white/25 text-xs mt-1">صور: JPG, PNG, WEBP — فيديو: MP4, MOV (أقصى 15MB)</p>
-                    </div>
+                    <>
+                      <p className="text-3xl mb-2">🖼️</p>
+                      <p className="text-white/50 text-sm font-semibold">اسحب الصورة هنا أو اضغط للاختيار</p>
+                      <p className="text-white/22 text-xs mt-1">JPG · PNG · WEBP · GIF (max 15MB)</p>
+                    </>
                   )}
                 </div>
 
-                {mediaExtracted && (
-                  <div className="mt-3 bg-black/30 border border-white/8 rounded-xl p-3">
-                    <p className="text-xs text-white/40 mb-1">النص المستخرج:</p>
-                    <p className="text-white/80 text-sm">{mediaExtracted}</p>
+                {mExtracted && (
+                  <div className="mt-3 bg-black/20 border border-white/7 rounded-xl p-3">
+                    <p className="text-[11px] text-white/30 mb-1">النص المستخرج:</p>
+                    <p className="text-white/65 text-sm leading-relaxed">{mExtracted}</p>
                   </div>
                 )}
 
                 <button
                   onClick={processMedia}
-                  disabled={loading || !mediaFile}
-                  className="w-full mt-4 py-3 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:opacity-40 font-bold text-sm flex items-center justify-center gap-2 transition-all shadow-lg shadow-violet-500/25"
+                  disabled={loading || !mFile}
+                  className="w-full mt-4 py-3 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:opacity-40 font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-violet-500/25 transition-all"
                 >
                   {loading ? <Spinner /> : "🔍"}
-                  {loading ? "بيحلل الميم..." : "استخرج وترجم"}
+                  {loading ? "بيحلل الصورة..." : "استخرج وترجم"}
                 </button>
               </motion.div>
             )}
@@ -549,10 +493,10 @@ export default function Home() {
           <AnimatePresence>
             {error && (
               <motion.div
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 6 }}
-                className="mt-4 bg-red-500/10 border border-red-500/25 rounded-xl p-3 text-sm text-red-300"
+                initial={{ opacity:0, y:6 }}
+                animate={{ opacity:1, y:0 }}
+                exit={{ opacity:0 }}
+                className="mt-4 bg-red-500/8 border border-red-500/20 rounded-xl p-3 text-sm text-red-300"
               >
                 ⚠️ {error}
               </motion.div>
@@ -560,137 +504,159 @@ export default function Home() {
           </AnimatePresence>
         </motion.div>
 
-        {/* Loading skeleton */}
+        {/* Loading */}
         <AnimatePresence>
           {loading && (
             <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="bg-[#111118] border border-white/8 rounded-2xl p-5 mb-4"
+              initial={{ opacity:0 }}
+              animate={{ opacity:1 }}
+              exit={{ opacity:0 }}
+              className="bg-[#111118] border border-white/7 rounded-2xl p-5 mb-3"
             >
               <div className="flex items-center gap-3 mb-4">
-                <div className="w-2 h-2 rounded-full bg-violet-400 animate-bounce" />
-                <p className="text-sm text-white/50">Claude بيحلل الميم...</p>
+                <Spinner />
+                <p className="text-sm text-white/40">بيحلل الميم...</p>
               </div>
-              {[["w-3/4"], ["w-1/2"], ["w-5/6"]].map(([w], i) => (
-                <div key={i} className={`h-3 ${w} rounded bg-white/8 mb-3 overflow-hidden relative`}>
-                  <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/10 to-transparent animate-[shimmer_1.5s_infinite]" />
+              {["w-3/4","w-1/2","w-5/6"].map((w, i) => (
+                <div key={i} className={`h-3 ${w} rounded bg-white/6 mb-3 overflow-hidden relative`}>
+                  <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/8 to-transparent animate-[shimmer_1.5s_infinite]" />
                 </div>
               ))}
-              <style>{`@keyframes shimmer { 100% { transform: translateX(200%); } }`}</style>
             </motion.div>
           )}
         </AnimatePresence>
 
         {/* Results */}
         <AnimatePresence>
-          {translation && !loading && (
+          {trans && !loading && (
             <motion.div
-              initial={{ opacity: 0, y: 14 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 10 }}
-              className="space-y-4"
+              initial={{ opacity:0, y:12 }}
+              animate={{ opacity:1, y:0 }}
+              exit={{ opacity:0 }}
+              className="space-y-3"
             >
-              {/* Translation Card */}
-              <div className="bg-[#111118] border border-violet-500/20 rounded-2xl p-5 shadow-xl shadow-violet-500/5">
+              {/* Not found warning */}
+              {!trans.found && (
+                <div className="bg-amber-500/8 border border-amber-500/20 rounded-xl p-3 text-xs text-amber-200">
+                  💡 العبارة دي مش موجودة في القاموس بالظبط — اللي جاي هو أقرب تحليل ممكن
+                </div>
+              )}
+
+              {/* Translation */}
+              <div className="bg-[#111118] border border-violet-500/20 rounded-2xl p-5">
                 <div className="flex items-center gap-2 mb-4">
                   <span className="text-lg">🎭</span>
-                  <h2 className="font-bold text-white">الترجمة الذكية</h2>
-                  <span className="mr-auto text-xs bg-violet-500/15 text-violet-300 border border-violet-500/20 px-2 py-0.5 rounded-full">
-                    {translation.tone}
+                  <h2 className="font-black text-sm text-white">الترجمة</h2>
+                  <span
+                    className="mr-auto text-[11px] px-2.5 py-0.5 rounded-full border font-bold"
+                    style={{
+                      background: `${toneColor}15`,
+                      borderColor: `${toneColor}30`,
+                      color: toneColor,
+                    }}
+                  >
+                    {trans.tone}
                   </span>
                 </div>
 
-                <div className="grid gap-3">
-                  <div className="bg-black/30 rounded-xl p-4">
-                    <p className="text-xs text-white/40 mb-1">الأصل</p>
-                    <p className="text-white/80 text-base leading-relaxed">{translation.original}</p>
+                <div className="space-y-2.5">
+                  <div className="bg-black/25 rounded-xl p-3.5">
+                    <p className="text-[11px] text-white/30 mb-1">الأصل</p>
+                    <p className="text-white/75 text-sm leading-relaxed">{trans.original}</p>
                   </div>
-                  <div className="bg-violet-500/8 border border-violet-500/15 rounded-xl p-4">
-                    <p className="text-xs text-violet-300/70 mb-1">الترجمة</p>
-                    <p className="text-white text-base font-medium leading-relaxed">{translation.translation}</p>
+                  <div
+                    className="rounded-xl p-3.5"
+                    style={{ background:"rgba(124,58,237,.1)", border:"1px solid rgba(124,58,237,.18)" }}
+                  >
+                    <p className="text-[11px] text-violet-300/60 mb-1">الترجمة</p>
+                    <p className="text-white font-bold text-[15px] leading-relaxed">{trans.translation}</p>
                     <button
-                      onClick={() => navigator.clipboard.writeText(translation.translation)}
-                      className="mt-2 text-xs text-violet-400/70 hover:text-violet-300 transition-colors flex items-center gap-1"
+                      onClick={() => navigator.clipboard.writeText(trans.translation)}
+                      className="mt-2 text-[11px] text-violet-400/55 hover:text-violet-300 transition-colors"
                     >
                       📋 نسخ
                     </button>
                   </div>
-                  {translation.explanation && (
-                    <div className="bg-white/[0.03] rounded-xl p-4">
-                      <p className="text-xs text-white/40 mb-1">الشرح</p>
-                      <p className="text-white/65 text-sm leading-relaxed">{translation.explanation}</p>
+                  {trans.explanation && (
+                    <div className="bg-white/[0.025] rounded-xl p-3.5">
+                      <p className="text-[11px] text-white/30 mb-1">الشرح</p>
+                      <p className="text-white/55 text-xs leading-relaxed">{trans.explanation}</p>
                     </div>
                   )}
                 </div>
               </div>
 
-              {/* Emotion Card */}
-              {emotion && (
-                <div className="bg-[#111118] border border-white/8 rounded-2xl p-5 shadow-xl shadow-black/40">
-                  <div className="flex items-center gap-2 mb-5">
+              {/* Emotion */}
+              {emo && primMeta && (
+                <div className="bg-[#111118] border border-white/7 rounded-2xl p-5">
+                  <div className="flex items-center gap-2 mb-4">
                     <span className="text-lg">🧠</span>
-                    <h2 className="font-bold text-white">تحليل المشاعر</h2>
+                    <h2 className="font-black text-sm text-white">تحليل المشاعر</h2>
                   </div>
 
-                  {/* Primary emotion hero */}
+                  {/* Hero */}
                   <div
-                    className="rounded-xl p-4 mb-5 text-center border"
+                    className="rounded-xl p-5 text-center mb-4 border"
                     style={{
-                      background: `${(EMOTION_META[emotion.primary] ?? EMOTION_META.neutral)?.color}12`,
-                      borderColor: `${(EMOTION_META[emotion.primary] ?? EMOTION_META.neutral)?.color}30`,
+                      background: `${primMeta.color}10`,
+                      borderColor: `${primMeta.color}25`,
                     }}
                   >
-                    <p className="text-5xl mb-2">{EMOTION_META[emotion.primary]?.emoji ?? "🎭"}</p>
-                    <p className="text-2xl font-black" style={{ color: EMOTION_META[emotion.primary]?.color ?? "#888" }}>
-                      {emotion.primary}
+                    <p className="text-5xl mb-2">{primMeta.emoji}</p>
+                    <p className="text-2xl font-black mb-1" style={{ color: primMeta.color }}>
+                      {emo.primary}
                     </p>
-                    {emotion.secondary && (
-                      <p className="text-white/50 text-sm mt-1">+ {emotion.secondary}</p>
+                    {emo.secondary && (
+                      <p className="text-white/38 text-xs">+ {emo.secondary}</p>
                     )}
-                    <div className="mt-3 flex items-center justify-center gap-2">
-                      <div className="h-1.5 flex-1 max-w-[120px] rounded-full bg-white/10 overflow-hidden">
+                    <div className="flex items-center justify-center gap-2 mt-3">
+                      <div className="h-1.5 w-24 rounded-full bg-white/8 overflow-hidden">
                         <motion.div
                           initial={{ width: 0 }}
-                          animate={{ width: `${(emotion.intensity / 5) * 100}%` }}
-                          transition={{ duration: 0.8, ease: "easeOut" }}
+                          animate={{ width: `${(emo.intensity / 5) * 100}%` }}
+                          transition={{ duration: 0.9 }}
                           className="h-full rounded-full"
-                          style={{ background: EMOTION_META[emotion.primary]?.color ?? "#888" }}
+                          style={{ background: primMeta.color }}
                         />
                       </div>
-                      <span className="text-xs text-white/40">شدة {emotion.intensity}/5</span>
+                      <span className="text-[11px] text-white/30 font-semibold">
+                        شدة {emo.intensity}/5
+                      </span>
                     </div>
                   </div>
 
-                  {/* Emotion breakdown bars */}
-                  <div className="space-y-3">
-                    <p className="text-xs text-white/40 font-medium mb-3">توزيع المشاعر</p>
-                    {Object.entries(emotion.percentages)
-                      .sort(([, a], [, b]) => b - a)
-                      .filter(([, v]) => v > 0)
-                      .map(([emo, pct]) => (
-                        <EmotionBar
-                          key={emo}
-                          label={emo}
-                          value={pct}
-                          color={EMOTION_META[emo]?.color ?? "#888"}
-                          emoji={EMOTION_META[emo]?.emoji ?? "🎭"}
-                        />
-                      ))}
-                  </div>
+                  {/* Bars */}
+                  <p className="text-[11px] text-white/30 font-bold tracking-wider mb-3">توزيع المشاعر</p>
+                  {Object.entries(emo.percentages)
+                    .sort(([, a], [, b]) => b - a)
+                    .filter(([, v]) => v > 0)
+                    .map(([name, pct]) => (
+                      <EmotionBar
+                        key={name}
+                        label={name}
+                        value={pct}
+                        color={EMOTION_META[name]?.color ?? "#888"}
+                        emoji={EMOTION_META[name]?.emoji ?? "🎭"}
+                      />
+                    ))}
 
-                  {/* Sentiment badge */}
-                  <div className="mt-4 flex items-center gap-2">
-                    <span className="text-xs text-white/40">التوجه العام:</span>
-                    <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${
-                      emotion.sentiment === "positive"
-                        ? "bg-green-500/10 border-green-500/25 text-green-400"
-                        : emotion.sentiment === "negative"
-                        ? "bg-red-500/10 border-red-500/25 text-red-400"
-                        : "bg-white/5 border-white/10 text-white/50"
-                    }`}>
-                      {emotion.sentiment === "positive" ? "😊 إيجابي" : emotion.sentiment === "negative" ? "😞 سلبي" : "😐 محايد"}
+                  {/* Sentiment */}
+                  <div className="flex items-center gap-2 mt-4 pt-4 border-t border-white/7">
+                    <span className="text-xs text-white/30">التوجه العام:</span>
+                    <span
+                      className={`text-xs font-black px-2.5 py-1 rounded-full border ${
+                        emo.sentiment === "positive"
+                          ? "bg-green-500/10 border-green-500/20 text-green-400"
+                          : emo.sentiment === "negative"
+                          ? "bg-red-500/10 border-red-500/20 text-red-400"
+                          : "bg-white/4 border-white/8 text-white/40"
+                      }`}
+                    >
+                      {emo.sentiment === "positive"
+                        ? "😊 إيجابي"
+                        : emo.sentiment === "negative"
+                        ? "😞 سلبي"
+                        : "😐 محايد"}
                     </span>
                   </div>
                 </div>
@@ -699,19 +665,15 @@ export default function Home() {
           )}
         </AnimatePresence>
 
-        {/* Empty state */}
-        {!translation && !loading && !error && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="text-center py-12 text-white/20 text-sm"
-          >
-            اختار طريقة الإدخال فوق وابدأ 🎭
-          </motion.div>
+        {/* Empty */}
+        {!trans && !loading && !error && (
+          <p className="text-center py-10 text-white/12 text-sm">
+            اختار طريقة الإدخال وابدأ 🎭
+          </p>
         )}
 
-        <footer className="mt-12 text-center text-white/20 text-xs">
-          مترجم الميمز المصرية • مدعوم بـ Claude AI • مجاني 100%
+        <footer className="mt-12 text-center text-white/12 text-[11px]">
+          مترجم الميمز المصرية · مجاني 100% · بدون API
         </footer>
       </div>
     </main>
