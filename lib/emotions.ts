@@ -1,5 +1,4 @@
-// lib/emotions.ts
-// Uses Claude AI to detect emotions from Egyptian Arabic text with percentages
+// lib/emotions.ts — 100% local, no API, no internet needed
 
 export type EmotionResult = {
   primary: string;
@@ -9,113 +8,83 @@ export type EmotionResult = {
   sentiment: "positive" | "neutral" | "negative";
 };
 
-const EMOTIONS_SYSTEM = `أنت خبير في علم النفس وتحليل المشاعر في اللهجة المصرية.
-حلل النص وحدد المشاعر الموجودة فيه بدقة.
-رد بـ JSON فقط بدون أي نص إضافي:
-{
-  "primary": "الشعور الأساسي بالعربي (فرحان / غاضب / زعلان / ساخر / متحمس / متضايق / خايف / مبسوط)",
-  "secondary": "شعور ثانوي إن وجد أو null",
-  "percentages": {
-    "فرحان": 0,
-    "غاضب": 0,
-    "زعلان": 0,
-    "ساخر": 0,
-    "متحمس": 0,
-    "متضايق": 0,
-    "خايف": 0,
-    "مبسوط": 0
-  },
-  "intensity": 3,
-  "sentiment": "positive"
-}
-قواعد:
-- مجموع الـ percentages لازم يساوي 100
-- intensity من 1 لـ 5
-- sentiment: "positive" أو "neutral" أو "negative"
-- لو النص قصير أو مش واضح، اعمل تحليل منطقي`;
+const EMOTION_KEYWORDS: Record<string, Partial<Record<string, number>>> = {
+  غاضب:   { غاضب:65, متضايق:20, زعلان:15 },
+  اتخنقت: { غاضب:60, متضايق:25, زعلان:15 },
+  كفاية:  { غاضب:55, متضايق:25, زعلان:20 },
+  مستفز:  { غاضب:60, ساخر:20, متضايق:20 },
+  بستهبل: { غاضب:40, ساخر:35, متضايق:25 },
+  بضيع:   { غاضب:50, متضايق:30, زعلان:20 },
+  زعلان:  { زعلان:60, متضايق:25, خايف:15 },
+  حزين:   { زعلان:65, متضايق:20, خايف:15 },
+  تعبت:   { زعلان:45, متضايق:35, خايف:20 },
+  ماليش:  { زعلان:40, متضايق:35, خايف:25 },
+  طبعاً:  { ساخر:65, متضايق:20, غاضب:15 },
+  أكيد:   { ساخر:60, متضايق:25, غاضب:15 },
+  واضح:   { ساخر:60, متضايق:25, مبسوط:15 },
+  ناصح:   { ساخر:65, متضايق:20, غاضب:15 },
+  استعبط: { ساخر:55, متضايق:25, غاضب:20 },
+  فرحان:  { فرحان:55, مبسوط:30, متحمس:15 },
+  ممتاز:  { فرحان:45, مبسوط:35, متحمس:20 },
+  تمام:   { مبسوط:50, فرحان:30, متحمس:20 },
+  حلو:    { فرحان:45, مبسوط:35, متحمس:20 },
+  رائع:   { متحمس:45, فرحان:35, مبسوط:20 },
+  تجنن:   { متحمس:50, فرحان:30, مبسوط:20 },
+  حبيبي:  { مبسوط:55, فرحان:30, متحمس:15 },
+  وحشتني: { مبسوط:45, فرحان:25, زعلان:30 },
+  أحبك:   { مبسوط:60, فرحان:30, متحمس:10 },
+  خايف:   { خايف:60, زعلان:25, متضايق:15 },
+  قلقان:  { خايف:55, متضايق:30, زعلان:15 },
+  متوتر:  { خايف:50, متضايق:30, زعلان:20 },
+  متحمس:  { متحمس:65, فرحان:25, مبسوط:10 },
+  يالا:   { متحمس:55, فرحان:30, مبسوط:15 },
+  نروح:   { متحمس:50, فرحان:30, مبسوط:20 },
+};
 
-async function callClaude(system: string, userMsg: string): Promise<string> {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "anthropic-dangerous-direct-browser-access": "true",
-    },
-    body: JSON.stringify({
-      model: "claude-opus-4-6",
-      max_tokens: 600,
-      system,
-      messages: [{ role: "user", content: userMsg }],
-    }),
-  });
+const EMPTY: Record<string, number> = {
+  فرحان: 0, غاضب: 0, زعلان: 0, ساخر: 0,
+  متحمس: 0, متضايق: 0, خايف: 0, مبسوط: 0,
+};
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err?.error?.message ?? `API error ${res.status}`);
+export function detectEmotions(text: string): EmotionResult {
+  const pcts = { ...EMPTY };
+  let matched = false;
+
+  for (const [keyword, weights] of Object.entries(EMOTION_KEYWORDS)) {
+    if (text.includes(keyword)) {
+      for (const [emo, val] of Object.entries(weights)) {
+        pcts[emo] = (pcts[emo] ?? 0) + (val ?? 0);
+      }
+      matched = true;
+    }
   }
 
-  const data = await res.json();
-  return data.content?.[0]?.text ?? "";
-}
-
-export async function detectEmotions(text: string): Promise<EmotionResult> {
-  if (!text.trim()) {
-    return {
-      primary: "neutral",
-      percentages: { فرحان: 0, غاضب: 0, زعلان: 0, ساخر: 0, متحمس: 0, متضايق: 0, خايف: 0, مبسوط: 0 },
-      intensity: 1,
-      sentiment: "neutral",
-    };
+  if (!matched) {
+    pcts.مبسوط = 40; pcts.فرحان = 25; pcts.متحمس = 20; pcts.ساخر = 15;
   }
 
-  const raw = await callClaude(
-    EMOTIONS_SYSTEM,
-    `حلل المشاعر في النص ده:\n\n"${text.trim()}"`
-  );
-
-  let parsed: any;
-  try {
-    parsed = JSON.parse(raw.replace(/```json|```/g, "").trim());
-  } catch {
-    // Fallback: keyword-based detection
-    return fallbackDetection(text);
-  }
-
-  // Normalise percentages to sum to 100
-  const pcts = parsed.percentages ?? {};
-  const total = Object.values(pcts).reduce((s: number, v: any) => s + (Number(v) || 0), 0);
-  if (total > 0 && Math.abs(total - 100) > 2) {
+  // Normalise to exactly 100
+  const total = Object.values(pcts).reduce((s, v) => s + v, 0);
+  if (total > 0 && total !== 100) {
     for (const k of Object.keys(pcts)) pcts[k] = Math.round((pcts[k] / total) * 100);
+    const diff = 100 - Object.values(pcts).reduce((s, v) => s + v, 0);
+    const top = Object.entries(pcts).sort(([, a], [, b]) => b - a)[0][0];
+    pcts[top] += diff;
   }
 
-  return {
-    primary: parsed.primary ?? "neutral",
-    secondary: parsed.secondary ?? undefined,
-    percentages: pcts,
-    intensity: Math.min(5, Math.max(1, Number(parsed.intensity) || 3)) as 1 | 2 | 3 | 4 | 5,
-    sentiment: parsed.sentiment ?? "neutral",
-  };
-}
+  const sorted = Object.entries(pcts).sort(([, a], [, b]) => b - a);
+  const primary = sorted[0][0];
+  const secondary = sorted[1][1] > 15 ? sorted[1][0] : undefined;
+  const primaryVal = sorted[0][1];
 
-// Simple keyword fallback if Claude fails
-function fallbackDetection(text: string): EmotionResult {
-  const t = text.toLowerCase();
-  let primary = "مبسوط";
-  let sentiment: "positive" | "neutral" | "negative" = "neutral";
+  const sentiment: "positive" | "neutral" | "negative" =
+    ["فرحان", "مبسوط", "متحمس"].includes(primary) ? "positive" :
+    ["غاضب", "زعلان", "متضايق", "خايف"].includes(primary) ? "negative" : "neutral";
 
-  if (/غاضب|زعلان|اتخنقت|كفاية|مستفز|بيضيع/.test(t)) { primary = "غاضب"; sentiment = "negative"; }
-  else if (/حزين|زعلان|كسرت|تعبت/.test(t)) { primary = "زعلان"; sentiment = "negative"; }
-  else if (/طبعاً|أكيد|ناصح|يسطا/.test(t)) { primary = "ساخر"; sentiment = "neutral"; }
-  else if (/فرحان|تمام|ممتاز|حلو|رائع/.test(t)) { primary = "فرحان"; sentiment = "positive"; }
-  else if (/حبيبي|وحشتني|أحبك/.test(t)) { primary = "مبسوط"; sentiment = "positive"; }
+  const intensity = (
+    primaryVal >= 70 ? 5 : primaryVal >= 55 ? 4 :
+    primaryVal >= 40 ? 3 : primaryVal >= 25 ? 2 : 1
+  ) as 1 | 2 | 3 | 4 | 5;
 
-  const pcts: Record<string, number> = {
-    فرحان: 0, غاضب: 0, زعلان: 0, ساخر: 0, متحمس: 0, متضايق: 0, خايف: 0, مبسوط: 0,
-  };
-  pcts[primary] = 70;
-  // Distribute remaining 30% among others
-  const others = Object.keys(pcts).filter((k) => k !== primary);
-  others.forEach((k, i) => { pcts[k] = i < 3 ? 10 : 0; });
-
-  return { primary, percentages: pcts, intensity: 3, sentiment };
+  return { primary, secondary, percentages: pcts, intensity, sentiment };
 }
