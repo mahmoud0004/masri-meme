@@ -1,919 +1,1362 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import type { ReactNode } from "react";
 import { detectEmotions } from "@/lib/emotions";
 import { extractTextFromFile } from "@/lib/ocr";
 import { getEmotionFromDictionary, translateMeme } from "@/lib/translations";
 import type { EmotionResult } from "@/lib/emotions";
-import type { TranslationResult } from "@/lib/translations";
+import type { TranslationMode, TranslationResult } from "@/lib/translations";
 
-type Tab = "text" | "voice" | "media";
-type UiLanguage = "en" | "ar";
+type PageView = "translate" | "dictionary" | "history";
+type InputMode = "text" | "voice" | "media";
+type ThemeMode = "light" | "dark";
+
+type CustomEntry = {
+  id: string;
+  slang: string;
+  meaning: string;
+  context: string;
+  formality: string;
+  offensiveness: string;
+  createdAt: string;
+};
+
+type HistoryEntry = {
+  id: string;
+  input: string;
+  translation: string;
+  tone: string;
+  source: InputMode;
+  mode: TranslationMode;
+  createdAt: string;
+};
+
+type SpeechRecognitionResultLike = {
+  transcript: string;
+};
+
+type SpeechRecognitionEventLike = {
+  results: ArrayLike<ArrayLike<SpeechRecognitionResultLike>>;
+};
+
+type SpeechRecognitionErrorEventLike = {
+  error: string;
+};
+
+type SpeechRecognitionLike = {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+
+declare global {
+  interface Window {
+    webkitSpeechRecognition?: SpeechRecognitionConstructor;
+    SpeechRecognition?: SpeechRecognitionConstructor;
+  }
+}
+
+const STORAGE_KEYS = {
+  theme: "slangy-theme",
+  dictionary: "slangy-custom-dictionary",
+  history: "slangy-history",
+} as const;
+
+const FORMALITY_OPTIONS = [
+  "1 - Very Casual",
+  "2 - Neutral",
+  "3 - Common Street Use",
+  "4 - Formal-ish",
+  "5 - Very Formal",
+];
+
+const OFFENSIVENESS_OPTIONS = [
+  "1 - Clean",
+  "2 - Not Offensive",
+  "3 - Slightly Harsh",
+  "4 - Offensive",
+  "5 - Very Offensive",
+];
+
+const EXAMPLES = [
+  "يا اسطى الدنيا ماشية ازاي؟",
+  "انا مخنوق من الشغل النهارده",
+  "متعملش فيها ناصح",
+  "دي حاجة تجنن",
+  "هو ايه اللي بيحصل ده؟",
+];
 
 const EMOTION_META: Record<string, { emoji: string; color: string }> = {
-  فرحان: { emoji: "😄", color: "#F59E0B" },
-  غاضب: { emoji: "😤", color: "#F97316" },
-  زعلان: { emoji: "🥲", color: "#60A5FA" },
-  ساخر: { emoji: "😏", color: "#FB7185" },
-  متحمس: { emoji: "🤩", color: "#14B8A6" },
-  متضايق: { emoji: "😒", color: "#A78BFA" },
-  خايف: { emoji: "😰", color: "#94A3B8" },
-  مبسوط: { emoji: "😊", color: "#22C55E" },
+  فرحان: { emoji: "Happy", color: "#f59e0b" },
+  غاضب: { emoji: "Angry", color: "#f97316" },
+  زعلان: { emoji: "Upset", color: "#60a5fa" },
+  ساخر: { emoji: "Sarcastic", color: "#fb7185" },
+  متحمس: { emoji: "Excited", color: "#14b8a6" },
+  متضايق: { emoji: "Annoyed", color: "#a78bfa" },
+  خايف: { emoji: "Afraid", color: "#94a3b8" },
+  مبسوط: { emoji: "Glad", color: "#22c55e" },
+};
+
+const TONE_LABELS: Record<string, string> = {
+  سخرية: "Sarcasm",
+  غضب: "Anger",
+  فرح: "Joy",
+  حب: "Love",
+  تحمس: "Excitement",
+  حزن: "Sadness",
+  تعجب: "Surprise",
+  عادي: "Neutral",
 };
 
 const TONE_COLORS: Record<string, string> = {
-  سخرية: "#FB7185",
-  غضب: "#F97316",
-  فرح: "#EAB308",
-  حب: "#F43F5E",
-  تحمس: "#14B8A6",
-  حزن: "#60A5FA",
-  تعجب: "#A78BFA",
-  عادي: "#94A3B8",
+  سخرية: "#fb7185",
+  غضب: "#f97316",
+  فرح: "#eab308",
+  حب: "#f43f5e",
+  تحمس: "#14b8a6",
+  حزن: "#60a5fa",
+  تعجب: "#a78bfa",
+  عادي: "#94a3b8",
 };
 
-const UI_COPY = {
-  en: {
-    langLabel: "Language",
-    langSwitch: "العربية",
-    titleLead: "Egyptian Meme",
-    titleAccent: "Translator",
-    inputStudio: "Input Studio",
-    inputTitle: "Enter your meme any way you like",
-    tabText: "Text",
-    tabVoice: "Voice",
-    tabMedia: "Image / Video",
-    writeAnything: "WRITE ANYTHING",
-    textPlaceholder: "Enter phrase here",
-    clear: "Clear",
-    analyze: "Analyze Meaning",
-    voiceBody: "Speak in Egyptian Arabic and the app will convert the speech into text, then interpret it.",
-    micDenied: "Microphone access is blocked. Allow it in the browser first.",
-    voiceIdle: "Tap and start speaking",
-    voiceRec: "Listening...",
-    voiceDone: "Voice captured",
-    transcript: "VOICE TRANSCRIPT",
-    transcriptPlaceholder: "The heard text will appear here, and you can edit it manually.",
-    analyzeVoice: "Analyze Voice Text",
-    mediaBody: "Upload a meme image or a short video and the app will extract visible text locally, then interpret it.",
-    dropTitle: "Drag a file here or click to browse",
-    extracted: "EXTRACTED TEXT",
-    processMedia: "Extract Text and Analyze Meaning",
-    insights: "Insight Panel",
-    insightsTitle: "Smart Result",
-    loading: "Preparing translation and analysis...",
-    confidence: "Confidence",
-    flexible: "Flexible interpretation",
-    original: "ORIGINAL",
-    interpretation: "INTERPRETATION",
-    why: "WHY THIS RESULT",
-    matched: "MATCHED EXPRESSIONS",
-    intensity: "Emotion intensity",
-    sentiment: "Overall sentiment",
-    positive: "Positive",
-    negative: "Negative",
-    neutral: "Neutral",
-    ready: "Ready to analyze",
-    readyBody:
-      "Type a sentence, record voice, or upload an image or video, and the app will show meaning, tone, and emotion analysis.",
-    modeLabels: {
-      dictionary: "Precise dictionary",
-      hybrid: "Smart hybrid",
-      inference: "Flexible inference",
-    },
-    toneLabels: {
-      سخرية: "Sarcasm",
-      غضب: "Anger",
-      فرح: "Joy",
-      حب: "Love",
-      تحمس: "Excitement",
-      حزن: "Sadness",
-      تعجب: "Surprise",
-      عادي: "Neutral",
-    },
-    emotionLabels: {
-      فرحان: "Happy",
-      غاضب: "Angry",
-      زعلان: "Upset",
-      ساخر: "Sarcastic",
-      متحمس: "Excited",
-      متضايق: "Annoyed",
-      خايف: "Afraid",
-      مبسوط: "Glad",
-    },
-    examples: [
-      "متعملش فيها ناصح",
-      "أنا تعبان ومش قادر أكمل",
-      "هو إيه اللي بيحصل ده؟",
-      "يا روح قلبي",
-      "حاجة تجنن",
-      "أنا مخنوق من الشغل النهارده",
-    ],
-    errors: {
-      emptyInput: "Write a sentence or phrase first.",
-      browserVoice: "This browser does not support voice input. Try Chrome or Edge.",
-      micBlocked: "Microphone access is blocked. Allow it from your browser settings.",
-      micMissing: "No microphone is available on this device.",
-      micAccess: "Could not access the microphone: ",
-      micRejected: "Microphone use was denied.",
-      noSpeech: "No clear speech was detected. Try again.",
-      audioCapture: "The microphone is in use by another app or unavailable.",
-      voiceIssue: "A speech recognition error occurred.",
-      voiceStart: "Failed to start recording: ",
-      fileTooLarge: "The file is larger than 30MB.",
-      fileType: "Upload an image or video only.",
-      noMedia: "Upload an image or video first.",
-      unclearText: "I could not read clear text from the file. Try a clearer file.",
-      fileFailed: "Failed to analyze the file.",
-      analysisFailed: "Something went wrong during analysis.",
-    },
-  },
-  ar: {
-    langLabel: "اللغة",
-    langSwitch: "English",
-    titleLead: "مترجم",
-    titleAccent: "الميمز المصرية",
-    inputStudio: "منطقة الإدخال",
-    inputTitle: "أدخل الميم بأي طريقة تحبها",
-    tabText: "نص",
-    tabVoice: "صوت",
-    tabMedia: "صورة / فيديو",
-    writeAnything: "اكتب أي شيء",
-    textPlaceholder: "اكتب العبارة هنا",
-    clear: "مسح",
-    analyze: "حلّل المعنى",
-    voiceBody: "اتكلم بالمصري، وسيتم تحويل الكلام إلى نص ثم تفسيره.",
-    micDenied: "الميكروفون مقفول. اسمح بالوصول من المتصفح أولًا.",
-    voiceIdle: "اضغط وابدأ الكلام",
-    voiceRec: "جاري الاستماع...",
-    voiceDone: "تم تسجيل الصوت",
-    transcript: "النص الصوتي",
-    transcriptPlaceholder: "النص الذي تم سماعه سيظهر هنا، ويمكنك تعديله يدويًا.",
-    analyzeVoice: "حلّل النص الصوتي",
-    mediaBody: "ارفع صورة ميم أو فيديو قصير، وسيتم استخراج النص المرئي محليًا ثم تفسيره.",
-    dropTitle: "اسحب الملف هنا أو اضغط للاختيار",
-    extracted: "النص المستخرج",
-    processMedia: "استخرج النص وحلّل المعنى",
-    insights: "لوحة النتائج",
-    insightsTitle: "النتيجة الذكية",
-    loading: "جاري تجهيز الترجمة والتحليل...",
-    confidence: "ثقة",
-    flexible: "تفسير مرن",
-    original: "الأصل",
-    interpretation: "التفسير",
-    why: "سبب النتيجة",
-    matched: "العبارات المتطابقة",
-    intensity: "شدة الإحساس",
-    sentiment: "التوجه العام",
-    positive: "إيجابي",
-    negative: "سلبي",
-    neutral: "محايد",
-    ready: "جاهز للتحليل",
-    readyBody:
-      "اكتب جملة، سجّل صوتًا، أو ارفع صورة أو فيديو، وسيعرض التطبيق المعنى والنبرة وتحليل المشاعر.",
-    modeLabels: {
-      dictionary: "قاموس دقيق",
-      hybrid: "هجين ذكي",
-      inference: "استنتاج مرن",
-    },
-    toneLabels: {
-      سخرية: "سخرية",
-      غضب: "غضب",
-      فرح: "فرح",
-      حب: "حب",
-      تحمس: "تحمس",
-      حزن: "حزن",
-      تعجب: "تعجب",
-      عادي: "عادي",
-    },
-    emotionLabels: {
-      فرحان: "فرحان",
-      غاضب: "غاضب",
-      زعلان: "زعلان",
-      ساخر: "ساخر",
-      متحمس: "متحمس",
-      متضايق: "متضايق",
-      خايف: "خايف",
-      مبسوط: "مبسوط",
-    },
-    examples: [
-      "متعملش فيها ناصح",
-      "أنا تعبان ومش قادر أكمل",
-      "هو إيه اللي بيحصل ده؟",
-      "يا روح قلبي",
-      "حاجة تجنن",
-      "أنا مخنوق من الشغل النهارده",
-    ],
-    errors: {
-      emptyInput: "اكتب جملة أو phrase الأول.",
-      browserVoice: "المتصفح الحالي لا يدعم الإدخال الصوتي. جرّب Chrome أو Edge.",
-      micBlocked: "الميكروفون مقفول. اسمح بالوصول من إعدادات المتصفح.",
-      micMissing: "مفيش ميكروفون متاح على الجهاز.",
-      micAccess: "تعذر الوصول للميكروفون: ",
-      micRejected: "تم رفض استخدام الميكروفون.",
-      noSpeech: "مافيش صوت واضح. جرّب مرة تانية.",
-      audioCapture: "الميكروفون مستخدم من تطبيق تاني أو غير متاح.",
-      voiceIssue: "حصلت مشكلة أثناء التعرف الصوتي.",
-      voiceStart: "فشل تشغيل التسجيل: ",
-      fileTooLarge: "الملف أكبر من 30MB.",
-      fileType: "ارفع صورة أو فيديو فقط.",
-      noMedia: "ارفع صورة أو فيديو الأول.",
-      unclearText: "لم أتمكن من قراءة نص واضح من الملف. جرّب ملفًا أوضح.",
-      fileFailed: "فشل تحليل الملف.",
-      analysisFailed: "حصل خطأ أثناء التحليل.",
-    },
-  },
-} as const;
-
-function Spinner() {
-  return <div className="h-5 w-5 animate-spin rounded-full border-2 border-white/15 border-t-[#14B8A6]" />;
+function normalizeText(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[أإآ]/g, "ا")
+    .replace(/ى/g, "ي")
+    .replace(/ة/g, "ه")
+    .replace(/[ً-ْ]/g, "")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ");
 }
 
-function WaveViz({ active }: { active: boolean }) {
-  return (
-    <div className="my-4 flex h-12 items-center justify-center gap-1">
-      {Array.from({ length: 18 }).map((_, index) => (
-        <div
-          key={index}
-          className="w-1 rounded-full transition-all duration-200"
-          style={{
-            height: active ? `${14 + ((index * 11 + 7) % 28)}px` : "4px",
-            background: active ? "#14B8A6" : "rgba(255,255,255,.16)",
-            animation: active ? `waveBar .8s ease-in-out ${index * 0.04}s infinite alternate` : "none",
-          }}
-        />
-      ))}
-    </div>
-  );
+function uid(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function EmotionBar({
-  label,
-  value,
-  color,
-  emoji,
-}: {
-  label: string;
-  value: number;
-  color: string;
-  emoji: string;
-}) {
+function formatRelativeDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown time";
+
+  const diff = Date.now() - date.getTime();
+  const mins = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
+  const days = Math.floor(diff / 86400000);
+
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  if (days < 7) return `${days}d ago`;
+  return date.toLocaleDateString();
+}
+
+function detectSource(file: File | null): "image" | "video" | null {
+  if (!file) return null;
+  const root = file.type.split("/")[0];
+  return root === "image" || root === "video" ? root : null;
+}
+
+function parseBulkEntries(raw: string, extension: string): Omit<CustomEntry, "id" | "createdAt">[] {
+  if (extension === "json") {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      throw new Error("JSON import expects an array of entries.");
+    }
+
+    return parsed
+      .map((item) => ({
+        slang: String(item.slang ?? item.term ?? "").trim(),
+        meaning: String(item.meaning ?? item.translation ?? "").trim(),
+        context: String(item.context ?? item.usage ?? "").trim(),
+        formality: String(item.formality ?? "2 - Neutral").trim(),
+        offensiveness: String(item.offensiveness ?? "2 - Not Offensive").trim(),
+      }))
+      .filter((item) => item.slang && item.meaning);
+  }
+
+  const lines = raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (!lines.length) return [];
+
+  const rows = lines.map((line) => line.split(",").map((cell) => cell.trim()));
+  const hasHeader = rows[0][0]?.toLowerCase().includes("slang");
+  const dataRows = hasHeader ? rows.slice(1) : rows;
+
+  return dataRows
+    .map((row) => ({
+      slang: row[0] ?? "",
+      meaning: row[1] ?? "",
+      context: row[2] ?? "",
+      formality: row[3] ?? "2 - Neutral",
+      offensiveness: row[4] ?? "2 - Not Offensive",
+    }))
+    .filter((item) => item.slang && item.meaning);
+}
+
+function LogoMark() {
   return (
-    <div className="mb-3 flex items-center gap-3">
-      <span className="w-7 text-center text-lg">{emoji}</span>
-      <div className="min-w-0 flex-1">
-        <div className="mb-1 flex items-center justify-between gap-3">
-          <span className="truncate text-xs font-semibold text-white/65">{label}</span>
-          <span className="text-xs font-black tabular-nums" style={{ color }}>
-            {value}%
-          </span>
-        </div>
-        <div className="h-2 overflow-hidden rounded-full bg-white/6">
-          <motion.div
-            initial={{ width: 0 }}
-            animate={{ width: `${value}%` }}
-            transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
-            className="h-full rounded-full"
-            style={{ background: `linear-gradient(90deg, ${color}66, ${color})` }}
-          />
-        </div>
+    <div className="relative h-12 w-16">
+      <div className="absolute left-0 top-0 flex h-10 w-10 items-center justify-center rounded-[14px] bg-[#fff7ed] text-[1.9rem] font-black leading-none text-[#ff8a1d] shadow-[0_8px_20px_rgba(255,138,29,0.16)]">
+        A
+        <div className="absolute -bottom-1.5 left-3 h-3 w-3 rotate-45 rounded-[2px] bg-[#fff7ed]" />
+      </div>
+      <div className="absolute bottom-0 right-0 flex h-10 w-10 items-center justify-center rounded-[14px] bg-[#ff8a1d] text-[1.5rem] font-black leading-none text-white shadow-[0_10px_22px_rgba(255,138,29,0.24)]">
+        文
+        <div className="absolute -bottom-1.5 right-3 h-3 w-3 rotate-45 rounded-[2px] bg-[#ff8a1d]" />
       </div>
     </div>
   );
 }
 
+function IconWrap({
+  children,
+  active,
+}: {
+  children: ReactNode;
+  active?: boolean;
+}) {
+  return (
+    <span
+      className={`inline-flex h-5 w-5 items-center justify-center ${
+        active ? "text-[#171717]" : "text-current"
+      }`}
+    >
+      {children}
+    </span>
+  );
+}
+
+function ChatIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+      <path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5c-1.4 0-2.72-.34-3.88-.94L3 21l1.99-5.17A8.47 8.47 0 0 1 3.5 11.5 8.5 8.5 0 0 1 12 3h.5A8.5 8.5 0 0 1 21 11.5Z" />
+    </svg>
+  );
+}
+
+function BookIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5V4.5A2.5 2.5 0 0 1 6.5 2Z" />
+    </svg>
+  );
+}
+
+function HistoryIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+      <path d="M3 3v5h5" />
+      <path d="M3.05 13A9 9 0 1 0 6 6.3L3 8" />
+      <path d="M12 7v5l4 2" />
+    </svg>
+  );
+}
+
+function SunIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2" />
+      <path d="M12 20v2" />
+      <path d="m4.93 4.93 1.41 1.41" />
+      <path d="m17.66 17.66 1.41 1.41" />
+      <path d="M2 12h2" />
+      <path d="M20 12h2" />
+      <path d="m6.34 17.66-1.41 1.41" />
+      <path d="m19.07 4.93-1.41 1.41" />
+    </svg>
+  );
+}
+
+function MoonIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+      <path d="M21 12.79A9 9 0 1 1 11.21 3c0 5 4 9 9 9 .27 0 .53-.01.79-.21Z" />
+    </svg>
+  );
+}
+
+function MicIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+      <path d="M12 15a3 3 0 0 0 3-3V7a3 3 0 1 0-6 0v5a3 3 0 0 0 3 3Z" />
+      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+      <path d="M12 19v3" />
+    </svg>
+  );
+}
+
+function ImageIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <circle cx="8.5" cy="8.5" r="1.5" />
+      <path d="m21 15-5-5L5 21" />
+    </svg>
+  );
+}
+
+function VideoIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+      <rect x="3" y="5" width="13" height="14" rx="2" />
+      <path d="m16 10 5-3v10l-5-3z" />
+    </svg>
+  );
+}
+
+function UploadIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-7 w-7">
+      <path d="M12 16V4" />
+      <path d="m7 9 5-5 5 5" />
+      <path d="M20 16.5v2A1.5 1.5 0 0 1 18.5 20h-13A1.5 1.5 0 0 1 4 18.5v-2" />
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+      <path d="M12 5v14" />
+      <path d="M5 12h14" />
+    </svg>
+  );
+}
+
+function SendIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+      <path d="M22 2 11 13" />
+      <path d="m22 2-7 20-4-9-9-4Z" />
+    </svg>
+  );
+}
+
+function EmptyIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-14 w-14">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 8v5" />
+      <path d="M12 16h.01" />
+    </svg>
+  );
+}
+
+function SectionHeader({
+  icon,
+  title,
+  subtitle,
+  right,
+}: {
+  icon: ReactNode;
+  title: string;
+  subtitle: string;
+  right?: ReactNode;
+}) {
+  return (
+    <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex items-start gap-4">
+        <div className="flex h-[72px] w-[72px] items-center justify-center rounded-[22px] bg-[#fff1e3] text-[#ff8a1d]">
+          {icon}
+        </div>
+        <div>
+          <h2 className="text-3xl font-black tracking-tight text-[#ff8a1d] sm:text-4xl">{title}</h2>
+          <p className="mt-1 text-lg text-[#8d6b4c]">{subtitle}</p>
+        </div>
+      </div>
+      {right}
+    </div>
+  );
+}
+
+function StatCard({ total, recent }: { total: number; recent: number }) {
+  return (
+    <div className="flex min-w-[220px] items-center justify-between rounded-[20px] border border-[#e8dacb] bg-white px-8 py-5 shadow-[0_10px_25px_rgba(84,48,14,0.08)]">
+      <div className="flex-1 text-center">
+        <div className="text-5xl font-black leading-none text-[#ff9a1f]">{total}</div>
+        <div className="mt-2 text-sm font-bold uppercase tracking-[0.12em] text-[#7d634d]">Total</div>
+      </div>
+      <div className="mx-6 h-14 w-px bg-[#eadbcf]" />
+      <div className="flex-1 text-center">
+        <div className="text-5xl font-black leading-none text-[#f6c019]">{recent}</div>
+        <div className="mt-2 text-sm font-bold uppercase tracking-[0.12em] text-[#7d634d]">Recent</div>
+      </div>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-2 block text-lg font-semibold text-[#21160f]">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function InputShell({
+  value,
+  onChange,
+  placeholder,
+  rows,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  rows?: number;
+}) {
+  if (rows) {
+    return (
+      <textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        rows={rows}
+        dir="rtl"
+        placeholder={placeholder}
+        className="w-full rounded-2xl border border-[#e6d8ca] bg-white px-5 py-4 text-lg text-[#4d3724] shadow-[inset_0_1px_2px_rgba(0,0,0,0.03)] outline-none transition focus:border-[#ffb86a] focus:ring-4 focus:ring-[#ffedd6]"
+      />
+    );
+  }
+
+  return (
+    <input
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      dir="rtl"
+      placeholder={placeholder}
+      className="w-full rounded-2xl border border-[#e6d8ca] bg-white px-5 py-4 text-lg text-[#4d3724] shadow-[inset_0_1px_2px_rgba(0,0,0,0.03)] outline-none transition focus:border-[#ffb86a] focus:ring-4 focus:ring-[#ffedd6]"
+    />
+  );
+}
+
 export default function Home() {
-  const [uiLang, setUiLang] = useState<UiLanguage>("en");
-  const [tab, setTab] = useState<Tab>("text");
+  const [mounted, setMounted] = useState(false);
+  const [theme, setTheme] = useState<ThemeMode>("light");
+  const [view, setView] = useState<PageView>("translate");
+  const [inputMode, setInputMode] = useState<InputMode>("text");
+  const [literalMode, setLiteralMode] = useState(false);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [txt, setTxt] = useState("");
+  const [textInput, setTextInput] = useState("");
+  const [voiceInput, setVoiceInput] = useState("");
+  const [voiceState, setVoiceState] = useState<"idle" | "recording" | "done">("idle");
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
 
-  const [vState, setVState] = useState<"idle" | "rec" | "done">("idle");
-  const [vText, setVText] = useState("");
-  const [micPerm, setMicPerm] = useState<"unknown" | "granted" | "denied">("unknown");
-  const recRef = useRef<any>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+  const [mediaFile, setMediaFile] = useState<File | null>(null);
+  const [mediaUrl, setMediaUrl] = useState<string | null>(null);
+  const [mediaExtracted, setMediaExtracted] = useState("");
+  const [dragActive, setDragActive] = useState(false);
+  const mediaKind = detectSource(mediaFile);
 
-  const [mFile, setMFile] = useState<File | null>(null);
-  const [mUrl, setMUrl] = useState<string | null>(null);
-  const [mExtracted, setMExtracted] = useState("");
-  const [drag, setDrag] = useState(false);
+  const [translation, setTranslation] = useState<TranslationResult | null>(null);
+  const [emotion, setEmotion] = useState<EmotionResult | null>(null);
 
-  const [trans, setTrans] = useState<TranslationResult | null>(null);
-  const [emo, setEmo] = useState<EmotionResult | null>(null);
+  const [customEntries, setCustomEntries] = useState<CustomEntry[]>([]);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
 
-  const copy = UI_COPY[uiLang];
-  const dir = uiLang === "ar" ? "rtl" : "ltr";
-  const textAlignClass = uiLang === "ar" ? "text-right" : "text-left";
+  const [dictTerm, setDictTerm] = useState("");
+  const [dictMeaning, setDictMeaning] = useState("");
+  const [dictContext, setDictContext] = useState("");
+  const [dictFormality, setDictFormality] = useState(FORMALITY_OPTIONS[1]);
+  const [dictOffensiveness, setDictOffensiveness] = useState(OFFENSIVENESS_OPTIONS[1]);
+
+  const importRef = useRef<HTMLInputElement | null>(null);
+
+  const recentDictionaryAdds = customEntries.filter((entry) => {
+    return Date.now() - new Date(entry.createdAt).getTime() < 7 * 24 * 60 * 60 * 1000;
+  }).length;
+
+  const primaryEmotion = emotion ? EMOTION_META[emotion.primary] : null;
+  const toneColor = translation ? TONE_COLORS[translation.tone] ?? "#94a3b8" : "#94a3b8";
 
   useEffect(() => {
-    const savedLang = window.localStorage.getItem("ui-language");
-    if (savedLang === "en" || savedLang === "ar") {
-      setUiLang(savedLang);
-    }
+    setMounted(true);
+
+    try {
+      const storedTheme = window.localStorage.getItem(STORAGE_KEYS.theme);
+      if (storedTheme === "light" || storedTheme === "dark") {
+        setTheme(storedTheme);
+      }
+
+      const storedEntries = window.localStorage.getItem(STORAGE_KEYS.dictionary);
+      if (storedEntries) {
+        setCustomEntries(JSON.parse(storedEntries));
+      }
+
+      const storedHistory = window.localStorage.getItem(STORAGE_KEYS.history);
+      if (storedHistory) {
+        setHistory(JSON.parse(storedHistory));
+      }
+    } catch {}
   }, []);
 
   useEffect(() => {
-    document.documentElement.lang = uiLang;
-    document.documentElement.dir = dir;
-    window.localStorage.setItem("ui-language", uiLang);
-  }, [dir, uiLang]);
+    if (!mounted) return;
+    window.localStorage.setItem(STORAGE_KEYS.theme, theme);
+  }, [mounted, theme]);
 
   useEffect(() => {
-    navigator.permissions
-      ?.query({ name: "microphone" as PermissionName })
-      .then((status) => {
-        const syncState = () =>
-          setMicPerm(
-            status.state === "granted" ? "granted" : status.state === "denied" ? "denied" : "unknown",
-          );
+    if (!mounted) return;
+    window.localStorage.setItem(STORAGE_KEYS.dictionary, JSON.stringify(customEntries));
+  }, [mounted, customEntries]);
 
-        syncState();
-        status.onchange = syncState;
-      })
-      .catch(() => {});
-  }, []);
+  useEffect(() => {
+    if (!mounted) return;
+    window.localStorage.setItem(STORAGE_KEYS.history, JSON.stringify(history));
+  }, [mounted, history]);
 
   useEffect(() => {
     return () => {
-      if (mUrl) URL.revokeObjectURL(mUrl);
+      if (mediaUrl) URL.revokeObjectURL(mediaUrl);
     };
-  }, [mUrl]);
+  }, [mediaUrl]);
 
-  function toggleLanguage() {
-    setUiLang((current) => (current === "en" ? "ar" : "en"));
+  function resolveCustomEntry(input: string) {
+    const normalizedInput = normalizeText(input);
+
+    return [...customEntries]
+      .sort((a, b) => b.slang.length - a.slang.length)
+      .find((entry) => {
+        const normalizedTerm = normalizeText(entry.slang);
+        return normalizedTerm && normalizedInput.includes(normalizedTerm);
+      });
   }
 
-  function runAnalysis(input: string) {
-    if (!input.trim()) {
-      setError(copy.errors.emptyInput);
+  function rememberHistory(result: TranslationResult, source: InputMode) {
+    setHistory((current) => [
+      {
+        id: uid("hist"),
+        input: result.original,
+        translation: result.translation,
+        tone: result.tone,
+        source,
+        mode: result.mode,
+        createdAt: new Date().toISOString(),
+      },
+      ...current,
+    ].slice(0, 20));
+  }
+
+  function analyzeText(input: string, source: InputMode) {
+    const trimmed = input.trim();
+    if (!trimmed) {
+      setError("Enter an Egyptian phrase first.");
       return;
     }
 
     setLoading(true);
     setError(null);
-    setTrans(null);
-    setEmo(null);
-
-    window.setTimeout(() => {
-      try {
-        const nextTranslation = translateMeme(input);
-        const nextEmotion = nextTranslation.found ? getEmotionFromDictionary(input) : detectEmotions(input);
-        setTrans(nextTranslation);
-        setEmo(nextEmotion);
-      } catch (err: any) {
-        setError(err?.message ?? copy.errors.analysisFailed);
-      } finally {
-        setLoading(false);
-      }
-    }, 400);
-  }
-
-  async function startVoice() {
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) {
-      setError(copy.errors.browserVoice);
-      return;
-    }
-
-    setError(null);
-    setTrans(null);
-    setEmo(null);
-    setVText("");
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-      setMicPerm("granted");
-    } catch (err: any) {
-      setMicPerm("denied");
-      setError(
-        err?.name === "NotAllowedError"
-          ? copy.errors.micBlocked
-          : err?.name === "NotFoundError"
-            ? copy.errors.micMissing
-            : `${copy.errors.micAccess}${err?.message ?? ""}`,
-      );
-      return;
-    }
+      const custom = resolveCustomEntry(trimmed);
+      let nextTranslation: TranslationResult;
 
-    const rec = new SR();
-    recRef.current = rec;
-    rec.lang = "ar-EG";
-    rec.continuous = false;
-    rec.interimResults = true;
-    rec.maxAlternatives = 1;
-    setVState("rec");
-
-    rec.onresult = (event: any) => {
-      let heard = "";
-      for (let index = event.resultIndex; index < event.results.length; index += 1) {
-        heard += event.results[index][0].transcript;
+      if (custom) {
+        nextTranslation = {
+          original: trimmed,
+          translation: custom.meaning,
+          explanation: custom.context || "This meaning comes from your custom dictionary.",
+          tone: "عادي",
+          found: true,
+          confidence: 0.99,
+          mode: "dictionary",
+          matchedPhrases: [custom.slang],
+        };
+      } else if (literalMode) {
+        const direct = translateMeme(trimmed);
+        nextTranslation = direct.found
+          ? direct
+          : {
+              original: trimmed,
+              translation: "No exact literal match found.",
+              explanation:
+                "Literal translation mode only returns exact dictionary-style matches. Turn it off to get inferred meaning.",
+              tone: "عادي",
+              found: false,
+              confidence: 0.42,
+              mode: "inference",
+              matchedPhrases: [],
+            };
+      } else {
+        nextTranslation = translateMeme(trimmed);
       }
-      if (heard.trim()) setVText(heard);
-    };
 
-    rec.onerror = (event: any) => {
-      const messages: Record<string, string> = {
-        "not-allowed": copy.errors.micRejected,
-        "no-speech": copy.errors.noSpeech,
-        "audio-capture": copy.errors.audioCapture,
-        network: copy.errors.voiceIssue,
-      };
+      const nextEmotion = nextTranslation.found ? getEmotionFromDictionary(trimmed) : detectEmotions(trimmed);
 
-      setError(messages[event.error] ?? `${copy.errors.voiceIssue}: ${event.error}`);
-      setVState("idle");
-      stopStream();
-    };
-
-    rec.onend = () => {
-      setVState("done");
-      stopStream();
-    };
-
-    try {
-      rec.start();
-    } catch (err: any) {
-      setError(`${copy.errors.voiceStart}${err?.message ?? ""}`);
-      setVState("idle");
-      stopStream();
+      setTranslation(nextTranslation);
+      setEmotion(nextEmotion);
+      rememberHistory(nextTranslation, source);
+    } catch {
+      setError("Something went wrong during analysis.");
+    } finally {
+      setLoading(false);
     }
-  }
-
-  function stopStream() {
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-    streamRef.current = null;
   }
 
   function stopVoice() {
-    recRef.current?.stop();
-    stopStream();
-    setVState("done");
+    recognitionRef.current?.stop();
+    setVoiceState("done");
   }
 
-  function loadFile(file: File | null) {
-    if (!file) return;
-
-    if (file.size > 30 * 1024 * 1024) {
-      setError(copy.errors.fileTooLarge);
-      return;
-    }
-
-    const topLevelType = file.type.split("/")[0];
-    if (!["image", "video"].includes(topLevelType)) {
-      setError(copy.errors.fileType);
+  function startVoice() {
+    const RecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!RecognitionCtor) {
+      setError("This browser does not support voice input. Try Chrome or Edge.");
       return;
     }
 
     setError(null);
-    setTrans(null);
-    setEmo(null);
-    setMExtracted("");
-    setMFile(file);
-    setMUrl((current) => {
+    const recognition = new RecognitionCtor();
+    recognition.lang = "ar-EG";
+    recognition.interimResults = true;
+    recognition.continuous = false;
+
+    recognition.onresult = (event) => {
+      let transcript = "";
+      for (const result of Array.from(event.results)) {
+        transcript += result[0]?.transcript ?? "";
+      }
+      setVoiceInput(transcript.trim());
+    };
+
+    recognition.onerror = (event) => {
+      if (event.error === "not-allowed") {
+        setError("Microphone access was blocked.");
+      } else if (event.error === "no-speech") {
+        setError("No clear speech was detected. Try again.");
+      } else {
+        setError("A speech recognition error occurred.");
+      }
+      setVoiceState("idle");
+    };
+
+    recognition.onend = () => {
+      setVoiceState((current) => (current === "recording" ? "done" : current));
+    };
+
+    recognitionRef.current = recognition;
+    setVoiceInput("");
+    setVoiceState("recording");
+    recognition.start();
+  }
+
+  function loadMedia(file: File | null) {
+    if (!file) return;
+
+    if (file.size > 30 * 1024 * 1024) {
+      setError("The file is larger than 30MB.");
+      return;
+    }
+
+    const kind = detectSource(file);
+    if (!kind) {
+      setError("Upload an image or video only.");
+      return;
+    }
+
+    setError(null);
+    setMediaFile(file);
+    setMediaExtracted("");
+
+    setMediaUrl((current) => {
       if (current) URL.revokeObjectURL(current);
       return URL.createObjectURL(file);
     });
   }
 
   async function processMedia() {
-    if (!mFile) {
-      setError(copy.errors.noMedia);
+    if (!mediaFile) {
+      setError("Upload an image or video first.");
       return;
     }
 
     setLoading(true);
     setError(null);
-    setTrans(null);
-    setEmo(null);
-    setMExtracted("");
 
     try {
-      const extracted = await extractTextFromFile(mFile);
+      const extracted = await extractTextFromFile(mediaFile);
       if (!extracted.trim()) {
-        throw new Error(copy.errors.unclearText);
+        setError("I could not read clear text from the file. Try a clearer file.");
+        return;
       }
 
-      setMExtracted(extracted);
-      const nextTranslation = translateMeme(extracted);
-      const nextEmotion = nextTranslation.found ? getEmotionFromDictionary(extracted) : detectEmotions(extracted);
-      setTrans(nextTranslation);
-      setEmo(nextEmotion);
-    } catch (err: any) {
-      setError(err?.message ?? copy.errors.fileFailed);
-    } finally {
+      setMediaExtracted(extracted);
+      analyzeText(extracted, "media");
+    } catch {
       setLoading(false);
+      setError("Failed to analyze the file.");
     }
   }
 
-  const primaryEmotion = emo ? EMOTION_META[emo.primary] ?? { emoji: "🎭", color: "#94A3B8" } : null;
-  const toneColor = trans ? TONE_COLORS[trans.tone] ?? "#94A3B8" : "#94A3B8";
-  const modeMeta = trans
-    ? { label: copy.modeLabels[trans.mode], color: trans.mode === "dictionary" ? "#14B8A6" : trans.mode === "hybrid" ? "#F59E0B" : "#A78BFA" }
-    : null;
-  const mediaKind = mFile?.type.startsWith("video/") ? "video" : "image";
+  function addDictionaryEntry() {
+    if (!dictTerm.trim() || !dictMeaning.trim()) {
+      setError("Add at least a slang term and its meaning.");
+      return;
+    }
 
-  const tabClassName = (id: Tab) =>
-    `rounded-full px-4 py-2.5 text-sm font-bold transition-all duration-200 ${
-      tab === id
-        ? "bg-[#0F766E] text-white shadow-[0_12px_30px_rgba(20,184,166,0.35)]"
-        : "border border-white/10 bg-white/5 text-white/55 hover:bg-white/10 hover:text-white"
-    }`;
+    const nextEntry: CustomEntry = {
+      id: uid("entry"),
+      slang: dictTerm.trim(),
+      meaning: dictMeaning.trim(),
+      context: dictContext.trim(),
+      formality: dictFormality,
+      offensiveness: dictOffensiveness,
+      createdAt: new Date().toISOString(),
+    };
+
+    setCustomEntries((current) => [nextEntry, ...current]);
+    setDictTerm("");
+    setDictMeaning("");
+    setDictContext("");
+    setDictFormality(FORMALITY_OPTIONS[1]);
+    setDictOffensiveness(OFFENSIVENESS_OPTIONS[1]);
+    setError(null);
+  }
+
+  async function importDictionaryFile(file: File | null) {
+    if (!file) return;
+
+    try {
+      const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+      if (extension !== "json" && extension !== "csv") {
+        throw new Error("Upload a CSV or JSON file.");
+      }
+
+      const raw = await file.text();
+      const parsed = parseBulkEntries(raw, extension);
+
+      const withMeta: CustomEntry[] = parsed.map((entry) => ({
+        ...entry,
+        id: uid("entry"),
+        createdAt: new Date().toISOString(),
+      }));
+
+      setCustomEntries((current) => {
+        const known = new Set(current.map((item) => normalizeText(item.slang)));
+        const unique = withMeta.filter((item) => !known.has(normalizeText(item.slang)));
+        return [...unique, ...current];
+      });
+
+      setError(null);
+    } catch (issue) {
+      setError(issue instanceof Error ? issue.message : "Failed to import file.");
+    }
+  }
+
+  const pageBg =
+    theme === "light"
+      ? "bg-[radial-gradient(circle_at_top,#fff8ef_0%,#fffaf5_34%,#fffdf9_100%)] text-[#1d140e]"
+      : "bg-[radial-gradient(circle_at_top,#3d250f_0%,#1a130f_35%,#120d0a_100%)] text-[#fff7ef]";
+  const frameClass =
+    theme === "light"
+      ? "border-[#e8d8c7] bg-white/90 shadow-[0_14px_30px_rgba(88,52,17,0.08)]"
+      : "border-[#483224] bg-[#1c140f]/92 shadow-[0_14px_30px_rgba(0,0,0,0.22)]";
+  const textMuted = theme === "light" ? "text-[#8d6b4c]" : "text-[#d4b89e]";
+  const inputPanel =
+    theme === "light"
+      ? "border-[#eadacc] bg-white shadow-[0_14px_30px_rgba(88,52,17,0.08)]"
+      : "border-[#483224] bg-[#201712]";
 
   return (
-    <main className="min-h-screen overflow-hidden bg-[#07111A] text-white" dir={dir}>
-      <style>{`
-        @keyframes waveBar { from { transform: scaleY(.35); } to { transform: scaleY(1); } }
-        @keyframes glowFloat { 0%,100% { transform: translateY(0px); } 50% { transform: translateY(-10px); } }
-      `}</style>
+    <main className={`min-h-screen ${pageBg}`}>
+      <div className={`border-b ${theme === "light" ? "border-[#eadccf] bg-white/90" : "border-[#433024] bg-[#1a130f]/90"} backdrop-blur`}>
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-6 py-4">
+          <div className="flex items-center gap-3">
+            <LogoMark />
+            <div className="text-[2rem] font-black tracking-tight text-[#ff8a1d]">Slangy</div>
+          </div>
 
-      <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(20,184,166,.18),_transparent_32%),radial-gradient(circle_at_85%_15%,_rgba(244,63,94,.16),_transparent_26%),radial-gradient(circle_at_50%_100%,_rgba(96,165,250,.14),_transparent_30%),linear-gradient(180deg,#07111A_0%,#0B1220_100%)]" />
-        <div className="absolute left-[6%] top-24 h-48 w-48 rounded-full bg-[#14B8A6]/10 blur-3xl [animation:glowFloat_8s_ease-in-out_infinite]" />
-        <div className="absolute right-[8%] top-40 h-56 w-56 rounded-full bg-[#F43F5E]/10 blur-3xl [animation:glowFloat_10s_ease-in-out_infinite]" />
+          <div className="flex flex-wrap items-center gap-3">
+            {[
+              { id: "translate", label: "Translate", icon: <ChatIcon /> },
+              { id: "dictionary", label: "Dictionary", icon: <BookIcon /> },
+              { id: "history", label: "History", icon: <HistoryIcon /> },
+            ].map((item) => {
+              const active = view === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setView(item.id as PageView)}
+                  className={`inline-flex items-center gap-2 rounded-xl border px-4 py-3 text-base font-semibold transition ${
+                    active
+                      ? "border-[#eb9411] bg-[#ffc62e] text-[#21160f] shadow-[0_6px_14px_rgba(255,198,46,0.24)]"
+                      : theme === "light"
+                        ? "border-transparent bg-transparent text-[#2f2318] hover:bg-[#fff3e4]"
+                        : "border-transparent bg-transparent text-[#f5d8b9] hover:bg-[#2c2018]"
+                  }`}
+                >
+                  <IconWrap active={active}>{item.icon}</IconWrap>
+                  {item.label}
+                </button>
+              );
+            })}
+          </div>
+
+          <button
+            onClick={() => setTheme((current) => (current === "light" ? "dark" : "light"))}
+            className={`inline-flex h-11 w-11 items-center justify-center rounded-full border transition ${
+              theme === "light"
+                ? "border-[#eadccf] bg-white text-[#2f2318] hover:bg-[#fff3e4]"
+                : "border-[#4a3628] bg-[#241a14] text-[#f5d8b9] hover:bg-[#2d2119]"
+            }`}
+            aria-label="Toggle theme"
+          >
+            {theme === "light" ? <SunIcon /> : <MoonIcon />}
+          </button>
+        </div>
       </div>
 
-      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 lg:py-12">
-        <motion.section
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.55 }}
-          className="mb-8 rounded-[28px] border border-white/10 bg-white/[0.04] p-6 shadow-[0_20px_80px_rgba(0,0,0,0.35)] backdrop-blur-xl lg:p-8"
-        >
-          <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-            <button
-              onClick={toggleLanguage}
-              className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white/80 transition hover:bg-white/10"
-            >
-              <span className="text-white/55">{copy.langLabel}</span>
-              <span>{copy.langSwitch}</span>
-            </button>
-          </div>
-
-          <div className="grid gap-8 lg:grid-cols-1 lg:items-center">
-            <div className={textAlignClass}>
-              <h1 className="max-w-3xl text-[clamp(2.4rem,7vw,5rem)] font-black leading-[0.95] tracking-tight">
-                {copy.titleLead}
-                <span className="block bg-[linear-gradient(135deg,#67E8F9_0%,#14B8A6_45%,#F9A8D4_100%)] bg-clip-text text-transparent">
-                  {copy.titleAccent}
-                </span>
+      <div className="mx-auto max-w-6xl px-6 py-10">
+        {view === "translate" && (
+          <>
+            <section className="mx-auto max-w-4xl text-center">
+              <h1 className="text-[clamp(3rem,9vw,5.8rem)] font-black leading-[0.95] tracking-tight text-[#ff8a1d]">
+                Understand the <span className="text-[#ffc62e]">Streets</span>
               </h1>
+              <p className={`mx-auto mt-6 max-w-3xl text-[1.1rem] leading-9 sm:text-[1.2rem] ${textMuted}`}>
+                Bridge the gap between Egyptian colloquial street slang and English with deep cultural context.
+              </p>
+            </section>
 
-            </div>
-          </div>
-        </motion.section>
-
-        <section className="grid gap-6 lg:grid-cols-[1.05fr_.95fr]">
-          <motion.div
-            initial={{ opacity: 0, y: 18 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.55, delay: 0.08 }}
-            className="rounded-[28px] border border-white/10 bg-white/[0.04] p-5 backdrop-blur-xl lg:p-6"
-          >
-            <div className={`mb-5 flex flex-wrap items-center justify-between gap-3 ${textAlignClass}`}>
-              <div>
-                <p className="text-xs font-bold uppercase tracking-[0.3em] text-white/35">{copy.inputStudio}</p>
-                <h2 className="mt-1 text-2xl font-black">{copy.inputTitle}</h2>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button className={tabClassName("text")} onClick={() => setTab("text")}>{copy.tabText}</button>
-                <button className={tabClassName("voice")} onClick={() => setTab("voice")}>{copy.tabVoice}</button>
-                <button className={tabClassName("media")} onClick={() => setTab("media")}>{copy.tabMedia}</button>
-              </div>
-            </div>
-
-            <AnimatePresence mode="wait">
-              {tab === "text" && (
-                <motion.div key="text" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-                  <div className={`rounded-[24px] border border-white/10 bg-[#09131D] p-4 ${textAlignClass}`}>
-                    <p className="mb-3 text-xs font-bold tracking-[0.24em] text-white/35">{copy.writeAnything}</p>
-                    <textarea
-                      dir="rtl"
-                      value={txt}
-                      onChange={(event) => setTxt(event.target.value)}
-                      onKeyDown={(event) => {
-                        if ((event.ctrlKey || event.metaKey) && event.key === "Enter") runAnalysis(txt);
-                      }}
-                      placeholder={copy.textPlaceholder}
-                      rows={6}
-                      className="w-full resize-none rounded-[22px] border border-white/10 bg-white/[0.03] p-4 text-base leading-8 text-white placeholder:text-white/20 focus:border-[#14B8A6]/60 focus:outline-none"
-                    />
-
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {copy.examples.map((example) => (
-                        <button
-                          key={example}
-                          onClick={() => setTxt(example)}
-                          className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs text-white/60 transition hover:border-[#14B8A6]/45 hover:text-white"
-                        >
-                          {example}
-                        </button>
-                      ))}
-                    </div>
-
-                    <div className="mt-5 flex flex-wrap gap-3">
-                      <button
-                        onClick={() => setTxt("")}
-                        className="rounded-full border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold text-white/65 transition hover:bg-white/10"
-                      >
-                        {copy.clear}
-                      </button>
-                      <button
-                        onClick={() => runAnalysis(txt)}
-                        disabled={loading}
-                        className="rounded-full bg-[linear-gradient(135deg,#14B8A6_0%,#0F766E_100%)] px-5 py-2.5 text-sm font-black text-white shadow-[0_16px_30px_rgba(20,184,166,0.25)] transition hover:scale-[1.01] disabled:opacity-50"
-                      >
-                        {loading ? copy.loading : copy.analyze}
-                      </button>
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-
-              {tab === "voice" && (
-                <motion.div key="voice" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-                  <div className={`rounded-[24px] border border-white/10 bg-[#09131D] p-5 text-center ${textAlignClass}`}>
-                    <p className="text-sm leading-7 text-white/65">{copy.voiceBody}</p>
-                    {micPerm === "denied" && (
-                      <div className="mt-4 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-3 text-sm text-amber-100">
-                        {copy.micDenied}
-                      </div>
-                    )}
-
-                    <WaveViz active={vState === "rec"} />
-
-                    <p className={`mb-4 text-sm font-bold ${vState === "rec" ? "text-[#5EEAD4]" : "text-white/45"}`}>
-                      {vState === "idle" && copy.voiceIdle}
-                      {vState === "rec" && copy.voiceRec}
-                      {vState === "done" && copy.voiceDone}
-                    </p>
-
+            <section className={`mx-auto mt-10 max-w-5xl rounded-[26px] border p-7 ${frameClass}`}>
+              <div className="mb-5 flex flex-wrap items-center gap-3">
+                {[
+                  { id: "text", label: "Text", icon: <ChatIcon /> },
+                  { id: "voice", label: "Voice", icon: <MicIcon /> },
+                  { id: "media", label: "Media", icon: <ImageIcon /> },
+                ].map((item) => {
+                  const active = inputMode === item.id;
+                  return (
                     <button
-                      onClick={vState === "rec" ? stopVoice : startVoice}
-                      disabled={loading || micPerm === "denied"}
-                      className={`mx-auto flex h-20 w-20 items-center justify-center rounded-full text-3xl shadow-lg transition ${
-                        vState === "rec"
-                          ? "bg-[#F43F5E] text-white shadow-[0_18px_40px_rgba(244,63,94,0.35)]"
-                          : "bg-[linear-gradient(135deg,#14B8A6_0%,#0F766E_100%)] text-white shadow-[0_18px_40px_rgba(20,184,166,0.35)]"
-                      } disabled:opacity-40`}
-                    >
-                      {vState === "rec" ? "⏹" : "🎙️"}
-                    </button>
-
-                    <div className={`mt-5 rounded-[22px] border border-white/10 bg-white/[0.03] p-4 ${textAlignClass}`}>
-                      <p className="mb-2 text-xs font-bold tracking-[0.2em] text-white/35">{copy.transcript}</p>
-                      <textarea
-                        dir="rtl"
-                        value={vText}
-                        onChange={(event) => setVText(event.target.value)}
-                        rows={4}
-                        placeholder={copy.transcriptPlaceholder}
-                        className="w-full resize-none bg-transparent text-base leading-8 text-white placeholder:text-white/20 focus:outline-none"
-                      />
-                    </div>
-
-                    <button
-                      onClick={() => runAnalysis(vText)}
-                      disabled={loading || !vText.trim()}
-                      className="mt-5 w-full rounded-full bg-[linear-gradient(135deg,#14B8A6_0%,#0F766E_100%)] px-5 py-3 text-sm font-black text-white shadow-[0_16px_30px_rgba(20,184,166,0.25)] transition disabled:opacity-50"
-                    >
-                      {loading ? copy.loading : copy.analyzeVoice}
-                    </button>
-                  </div>
-                </motion.div>
-              )}
-
-              {tab === "media" && (
-                <motion.div key="media" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-                  <div className={`rounded-[24px] border border-white/10 bg-[#09131D] p-4 ${textAlignClass}`}>
-                    <p className="mb-4 text-sm leading-7 text-white/65">{copy.mediaBody}</p>
-
-                    <div
-                      onDragOver={(event) => {
-                        event.preventDefault();
-                        setDrag(true);
-                      }}
-                      onDragLeave={() => setDrag(false)}
-                      onDrop={(event) => {
-                        event.preventDefault();
-                        setDrag(false);
-                        loadFile(event.dataTransfer.files[0] ?? null);
-                      }}
-                      className={`relative rounded-[24px] border border-dashed p-6 text-center transition ${
-                        drag ? "border-[#14B8A6] bg-[#14B8A6]/10" : "border-white/15 bg-white/[0.03]"
+                      key={item.id}
+                      onClick={() => setInputMode(item.id as InputMode)}
+                      className={`inline-flex items-center gap-2 rounded-full border px-4 py-2.5 text-sm font-bold transition ${
+                        active
+                          ? "border-[#eb9411] bg-[#ffc62e] text-[#21160f]"
+                          : theme === "light"
+                            ? "border-[#eadccf] bg-[#fff8f1] text-[#7a5a3a] hover:bg-[#fff1de]"
+                            : "border-[#4a3628] bg-[#241a14] text-[#d6b392] hover:bg-[#2c2018]"
                       }`}
                     >
-                      <input
-                        type="file"
-                        accept="image/*,video/*"
-                        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                        onChange={(event) => loadFile(event.target.files?.[0] ?? null)}
-                      />
-
-                      {mUrl ? (
-                        <div className="space-y-3">
-                          {mediaKind === "image" ? (
-                            <img src={mUrl} alt="preview" className="mx-auto max-h-60 rounded-2xl object-contain" />
-                          ) : (
-                            <video src={mUrl} controls className="mx-auto max-h-60 rounded-2xl object-contain" />
-                          )}
-                          <p className="text-sm text-white/65">{mFile?.name}</p>
-                        </div>
-                      ) : (
-                        <>
-                          <p className="mb-2 text-4xl">🎞️</p>
-                          <p className="text-base font-bold text-white">{copy.dropTitle}</p>
-                          <p className="mt-2 text-sm text-white/45">JPG / PNG / WEBP / GIF / MP4 / MOV</p>
-                        </>
-                      )}
-                    </div>
-
-                    {mExtracted && (
-                      <div className={`mt-4 rounded-[22px] border border-white/10 bg-white/[0.03] p-4 ${textAlignClass}`}>
-                        <p className="mb-2 text-xs font-bold tracking-[0.2em] text-white/35">{copy.extracted}</p>
-                        <p className="text-sm leading-8 text-white/75">{mExtracted}</p>
-                      </div>
-                    )}
-
-                    <button
-                      onClick={processMedia}
-                      disabled={loading || !mFile}
-                      className="mt-5 w-full rounded-full bg-[linear-gradient(135deg,#14B8A6_0%,#0F766E_100%)] px-5 py-3 text-sm font-black text-white shadow-[0_16px_30px_rgba(20,184,166,0.25)] transition disabled:opacity-50"
-                    >
-                      {loading ? copy.loading : copy.processMedia}
+                      {item.icon}
+                      {item.label}
                     </button>
+                  );
+                })}
+              </div>
+
+              {inputMode === "text" && (
+                <div className={`rounded-[22px] border p-5 ${inputPanel}`}>
+                  <textarea
+                    value={textInput}
+                    onChange={(event) => setTextInput(event.target.value)}
+                    dir="rtl"
+                    rows={6}
+                    placeholder="Type Egyptian slang here in Arabic or Arabizi (e.g. يا اسطى, ya sosta)..."
+                    className={`w-full resize-none rounded-2xl border px-5 py-4 text-[1.05rem] leading-8 outline-none transition ${
+                      theme === "light"
+                        ? "border-[#e6d8ca] bg-white text-[#5a4029] placeholder:text-[#9d7d61] focus:border-[#ffb25a] focus:ring-4 focus:ring-[#fff0dd]"
+                        : "border-[#4a3628] bg-[#1a120d] text-[#fae4ce] placeholder:text-[#b58b68] focus:border-[#ffb25a]"
+                    }`}
+                  />
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {EXAMPLES.map((example) => (
+                      <button
+                        key={example}
+                        onClick={() => setTextInput(example)}
+                        className={`rounded-full border px-3 py-1.5 text-sm transition ${
+                          theme === "light"
+                            ? "border-[#eadccf] bg-[#fffaf4] text-[#8d6b4c] hover:border-[#ffbe72] hover:text-[#5b4028]"
+                            : "border-[#4a3628] bg-[#241912] text-[#d8b89d] hover:border-[#ffbe72]"
+                        }`}
+                      >
+                        {example}
+                      </button>
+                    ))}
                   </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
-            <AnimatePresence>
-              {error && (
-                <motion.div
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-400/10 p-4 text-sm text-rose-100"
-                >
-                  {error}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 18 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.55, delay: 0.16 }}
-            className="rounded-[28px] border border-white/10 bg-white/[0.04] p-5 backdrop-blur-xl lg:p-6"
-          >
-            <div className={`mb-5 flex items-center justify-between gap-3 ${textAlignClass}`}>
-              <div>
-                <p className="text-xs font-bold uppercase tracking-[0.3em] text-white/35">{copy.insights}</p>
-                <h2 className="mt-1 text-2xl font-black">{copy.insightsTitle}</h2>
-              </div>
-              {trans && modeMeta && (
-                <span
-                  className="rounded-full border px-3 py-1 text-xs font-black"
-                  style={{
-                    color: modeMeta.color,
-                    borderColor: `${modeMeta.color}55`,
-                    background: `${modeMeta.color}15`,
-                  }}
-                >
-                  {modeMeta.label}
-                </span>
-              )}
-            </div>
-
-            {loading ? (
-              <div className="rounded-[24px] border border-white/10 bg-[#09131D] p-5">
-                <div className="mb-5 flex items-center gap-3 text-white/70">
-                  <Spinner />
-                  <p className="text-sm">{copy.loading}</p>
                 </div>
-                <div className="space-y-3">
-                  {["w-4/5", "w-full", "w-3/5"].map((width) => (
-                    <div key={width} className={`h-3 ${width} animate-pulse rounded-full bg-white/8`} />
-                  ))}
-                </div>
-              </div>
-            ) : trans ? (
-              <div className="space-y-4">
-                <div className={`rounded-[26px] border border-white/10 bg-[linear-gradient(180deg,rgba(11,22,34,.95),rgba(7,17,26,.95))] p-5 ${textAlignClass}`}>
-                  <div className="mb-4 flex flex-wrap items-center gap-2">
-                    <span
-                      className="rounded-full border px-3 py-1 text-xs font-black"
-                      style={{
-                        color: toneColor,
-                        borderColor: `${toneColor}44`,
-                        background: `${toneColor}18`,
-                      }}
+              )}
+
+              {inputMode === "voice" && (
+                <div className={`rounded-[22px] border p-6 ${inputPanel}`}>
+                  <div className="text-center">
+                    <button
+                      onClick={voiceState === "recording" ? stopVoice : startVoice}
+                      disabled={loading}
+                      className={`mx-auto inline-flex h-20 w-20 items-center justify-center rounded-full border-4 text-[#2f2318] transition ${
+                        voiceState === "recording"
+                          ? "border-[#ffb3a8] bg-[#ff8e78] text-white shadow-[0_12px_25px_rgba(255,142,120,0.24)]"
+                          : "border-[#ffe2bf] bg-[#fff2df] text-[#ff8a1d] shadow-[0_12px_25px_rgba(255,185,92,0.18)]"
+                      }`}
                     >
-                      {copy.toneLabels[trans.tone as keyof typeof copy.toneLabels] ?? trans.tone}
-                    </span>
-                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-bold text-white/60">
-                      {copy.confidence} {Math.round(trans.confidence * 100)}%
-                    </span>
-                    {!trans.found && (
-                      <span className="rounded-full border border-amber-300/20 bg-amber-300/10 px-3 py-1 text-xs font-bold text-amber-100">
-                        {copy.flexible}
-                      </span>
+                      <MicIcon />
+                    </button>
+                    <p className={`mt-4 text-lg font-semibold ${theme === "light" ? "text-[#5b4028]" : "text-[#fae4ce]"}`}>
+                      {voiceState === "recording"
+                        ? "Listening..."
+                        : voiceState === "done"
+                          ? "Voice captured"
+                          : "Tap to start speaking"}
+                    </p>
+                  </div>
+
+                  <div className="mt-6">
+                    <Field label="Transcript">
+                      <InputShell
+                        value={voiceInput}
+                        onChange={setVoiceInput}
+                        placeholder="The detected speech will appear here."
+                        rows={4}
+                      />
+                    </Field>
+                  </div>
+                </div>
+              )}
+
+              {inputMode === "media" && (
+                <div className={`rounded-[22px] border p-5 ${inputPanel}`}>
+                  <div
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      setDragActive(true);
+                    }}
+                    onDragLeave={() => setDragActive(false)}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      setDragActive(false);
+                      loadMedia(event.dataTransfer.files[0] ?? null);
+                    }}
+                    className={`relative rounded-[24px] border-2 border-dashed px-6 py-10 text-center transition ${
+                      dragActive ? "border-[#ffb25a] bg-[#fff6ea]" : "border-[#ebddcf] bg-[#fffdfa]"
+                    }`}
+                  >
+                    <input
+                      type="file"
+                      accept="image/*,video/*"
+                      className="absolute inset-0 cursor-pointer opacity-0"
+                      onChange={(event) => loadMedia(event.target.files?.[0] ?? null)}
+                    />
+
+                    {mediaUrl ? (
+                      <div className="space-y-3">
+                        {mediaKind === "image" ? (
+                          <img src={mediaUrl} alt="preview" className="mx-auto max-h-64 rounded-2xl object-contain" />
+                        ) : (
+                          <video src={mediaUrl} controls className="mx-auto max-h-64 rounded-2xl object-contain" />
+                        )}
+                        <p className="font-medium text-[#7d634d]">{mediaFile?.name}</p>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[#fff1e3] text-[#ff8a1d]">
+                          <UploadIcon />
+                        </div>
+                        <h3 className="mt-5 text-3xl font-black text-[#1f150f]">Upload Visual Slang</h3>
+                        <p className="mt-2 text-lg text-[#8d6b4c]">Drop an image or a short video and we will read the visible Arabic text.</p>
+                      </>
                     )}
                   </div>
 
-                  <div className="space-y-3">
-                    <div className="rounded-[20px] border border-white/8 bg-white/[0.03] p-4">
-                      <p className="mb-2 text-xs font-bold tracking-[0.2em] text-white/35">{copy.original}</p>
-                      <p className="text-sm leading-8 text-white/75">{trans.original}</p>
+                  {mediaExtracted && (
+                    <div className="mt-5 rounded-2xl border border-[#eadacc] bg-[#fffdfa] p-5">
+                      <div className="text-sm font-bold uppercase tracking-[0.18em] text-[#b28b68]">Extracted Text</div>
+                      <p className="mt-3 text-lg leading-8 text-[#5a4029]">{mediaExtracted}</p>
                     </div>
+                  )}
+                </div>
+              )}
 
-                    <div className="rounded-[20px] border p-4" style={{ borderColor: `${toneColor}33`, background: `${toneColor}12` }}>
-                      <p className="mb-2 text-xs font-bold tracking-[0.2em]" style={{ color: toneColor }}>
-                        {copy.interpretation}
-                      </p>
-                      <p className="text-base font-bold leading-8 text-white">{trans.translation}</p>
-                    </div>
-
-                    <div className="rounded-[20px] border border-white/8 bg-white/[0.03] p-4">
-                      <p className="mb-2 text-xs font-bold tracking-[0.2em] text-white/35">{copy.why}</p>
-                      <p className="text-sm leading-8 text-white/70">{trans.explanation}</p>
-                    </div>
-                  </div>
+              <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setInputMode("voice")}
+                    className={`inline-flex h-[60px] w-[60px] items-center justify-center rounded-full border ${
+                      theme === "light" ? "border-[#eadacc] bg-white text-[#2e2218]" : "border-[#4a3628] bg-[#211711] text-[#f2d9bc]"
+                    }`}
+                  >
+                    <MicIcon />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setInputMode("media")}
+                    className={`inline-flex h-[60px] w-[60px] items-center justify-center rounded-full border ${
+                      theme === "light" ? "border-[#eadacc] bg-white text-[#2e2218]" : "border-[#4a3628] bg-[#211711] text-[#f2d9bc]"
+                    }`}
+                  >
+                    <ImageIcon />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setInputMode("media")}
+                    className={`inline-flex h-[60px] w-[60px] items-center justify-center rounded-full border ${
+                      theme === "light" ? "border-[#eadacc] bg-white text-[#2e2218]" : "border-[#4a3628] bg-[#211711] text-[#f2d9bc]"
+                    }`}
+                  >
+                    <VideoIcon />
+                  </button>
                 </div>
 
-                {trans.matchedPhrases.length > 0 && (
-                  <div className={`rounded-[24px] border border-white/10 bg-[#09131D] p-4 ${textAlignClass}`}>
-                    <p className="mb-3 text-xs font-bold tracking-[0.2em] text-white/35">{copy.matched}</p>
-                    <div className="flex flex-wrap gap-2">
-                      {trans.matchedPhrases.map((phrase) => (
-                        <span key={phrase} className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-white/70">
-                          {phrase}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {emo && primaryEmotion && (
-                  <div className={`rounded-[24px] border border-white/10 bg-[#09131D] p-5 ${textAlignClass}`}>
-                    <div
-                      className="mb-5 rounded-[22px] border p-5 text-center"
-                      style={{
-                        borderColor: `${primaryEmotion.color}33`,
-                        background: `${primaryEmotion.color}12`,
-                      }}
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+                  <label className="inline-flex items-center gap-3 text-lg font-semibold text-[#2b2017]">
+                    <button
+                      type="button"
+                      onClick={() => setLiteralMode((current) => !current)}
+                      className={`relative h-8 w-14 rounded-full transition ${literalMode ? "bg-[#ffbf61]" : "bg-[#e6ddd4]"}`}
                     >
-                      <p className="mb-2 text-5xl">{primaryEmotion.emoji}</p>
-                      <p className="text-2xl font-black" style={{ color: primaryEmotion.color }}>
-                        {copy.emotionLabels[emo.primary as keyof typeof copy.emotionLabels] ?? emo.primary}
-                      </p>
-                      {emo.secondary && (
-                        <p className="mt-1 text-sm text-white/45">
-                          + {copy.emotionLabels[emo.secondary as keyof typeof copy.emotionLabels] ?? emo.secondary}
-                        </p>
-                      )}
-                      <p className="mt-3 text-xs font-bold text-white/45">
-                        {copy.intensity}: {emo.intensity}/5
-                      </p>
-                    </div>
+                      <span
+                        className={`absolute top-1 h-6 w-6 rounded-full bg-white shadow transition ${literalMode ? "left-7" : "left-1"}`}
+                      />
+                    </button>
+                    Literal Translation
+                  </label>
 
-                    {Object.entries(emo.percentages)
-                      .sort(([, a], [, b]) => b - a)
-                      .filter(([, value]) => value > 0)
-                      .map(([label, value]) => (
-                        <EmotionBar
-                          key={label}
-                          label={copy.emotionLabels[label as keyof typeof copy.emotionLabels] ?? label}
-                          value={value}
-                          color={EMOTION_META[label]?.color ?? "#94A3B8"}
-                          emoji={EMOTION_META[label]?.emoji ?? "🎭"}
-                        />
-                      ))}
-
-                    <div className="mt-4 flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.03] p-4">
-                      <span className="text-sm text-white/55">{copy.sentiment}</span>
-                      <span className="text-sm font-black text-white">
-                        {emo.sentiment === "positive" ? copy.positive : emo.sentiment === "negative" ? copy.negative : copy.neutral}
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="flex min-h-[420px] items-center justify-center rounded-[24px] border border-white/10 bg-[#09131D] p-8 text-center">
-                <div>
-                  <p className="mb-3 text-5xl">🧠</p>
-                  <h3 className="text-xl font-black">{copy.ready}</h3>
-                  <p className="mt-3 max-w-md text-sm leading-7 text-white/55">{copy.readyBody}</p>
+                  <button
+                    onClick={() => {
+                      if (inputMode === "text") analyzeText(textInput, "text");
+                      if (inputMode === "voice") analyzeText(voiceInput, "voice");
+                      if (inputMode === "media") void processMedia();
+                    }}
+                    disabled={loading}
+                    className="inline-flex items-center justify-center gap-3 rounded-xl bg-[#ffc391] px-7 py-4 text-xl font-black text-white shadow-[0_14px_24px_rgba(255,150,55,0.26)] transition hover:bg-[#ffb46d] disabled:opacity-60"
+                  >
+                    <SendIcon />
+                    {loading ? "Translating..." : "Translate"}
+                  </button>
                 </div>
+              </div>
+            </section>
+
+            {error && (
+              <div className="mx-auto mt-5 max-w-5xl rounded-2xl border border-[#f7c1bc] bg-[#fff0ee] px-5 py-4 text-base text-[#8c3a32]">
+                {error}
               </div>
             )}
-          </motion.div>
-        </section>
+
+            <section className="mx-auto mt-8 grid max-w-5xl gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+              <div className={`rounded-[26px] border p-6 ${frameClass}`}>
+                <div className="mb-4 text-sm font-bold uppercase tracking-[0.18em] text-[#b38c68]">Translation Result</div>
+                {translation ? (
+                  <div className="space-y-4">
+                    <div className="rounded-3xl border border-[#ffe0bc] bg-[linear-gradient(180deg,#fff8ee_0%,#fff2df_100%)] p-5">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span
+                          className="rounded-full border px-3 py-1 text-xs font-black"
+                          style={{
+                            color: toneColor,
+                            borderColor: `${toneColor}33`,
+                            backgroundColor: `${toneColor}12`,
+                          }}
+                        >
+                          {TONE_LABELS[translation.tone] ?? translation.tone}
+                        </span>
+                        <span className="rounded-full border border-[#ecd8c5] bg-white px-3 py-1 text-xs font-bold text-[#7f6650]">
+                          {Math.round(translation.confidence * 100)}% confidence
+                        </span>
+                        <span className="rounded-full border border-[#ecd8c5] bg-white px-3 py-1 text-xs font-bold text-[#7f6650]">
+                          {translation.mode}
+                        </span>
+                      </div>
+
+                      <div className="mt-5 space-y-4">
+                        <div className="rounded-2xl border border-[#ecdccf] bg-white p-4">
+                          <div className="text-xs font-bold uppercase tracking-[0.16em] text-[#b28b68]">Original</div>
+                          <p className="mt-2 text-lg leading-8 text-[#5a4029]">{translation.original}</p>
+                        </div>
+
+                        <div className="rounded-2xl border p-4" style={{ borderColor: `${toneColor}30`, backgroundColor: `${toneColor}10` }}>
+                          <div className="text-xs font-bold uppercase tracking-[0.16em]" style={{ color: toneColor }}>
+                            Interpretation
+                          </div>
+                          <p className="mt-2 text-xl font-black leading-8 text-[#21160f]">{translation.translation}</p>
+                        </div>
+
+                        <div className="rounded-2xl border border-[#ecdccf] bg-white p-4">
+                          <div className="text-xs font-bold uppercase tracking-[0.16em] text-[#b28b68]">Why this result</div>
+                          <p className="mt-2 text-base leading-8 text-[#6f5540]">{translation.explanation}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {translation.matchedPhrases.length > 0 && (
+                      <div className="rounded-2xl border border-[#eadacc] bg-white p-5">
+                        <div className="text-sm font-bold uppercase tracking-[0.16em] text-[#b28b68]">Matched Expressions</div>
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          {translation.matchedPhrases.map((phrase) => (
+                            <span key={phrase} className="rounded-full border border-[#ecdccf] bg-[#fff8f1] px-3 py-1.5 text-sm text-[#7f6650]">
+                              {phrase}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex min-h-[320px] items-center justify-center rounded-3xl border border-[#eadacc] bg-white text-center">
+                    <div>
+                      <div className="text-5xl font-black text-[#ffd083]">A</div>
+                      <h3 className="mt-4 text-2xl font-black text-[#1f150f]">Ready to translate</h3>
+                      <p className="mt-3 max-w-md text-lg leading-8 text-[#8d6b4c]">
+                        Enter slang in text, voice, or media form and we will explain the meaning, tone, and emotional vibe.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className={`rounded-[26px] border p-6 ${frameClass}`}>
+                <div className="mb-4 text-sm font-bold uppercase tracking-[0.18em] text-[#b38c68]">Emotion Insight</div>
+                {emotion && primaryEmotion ? (
+                  <div className="space-y-4">
+                    <div
+                      className="rounded-3xl border p-6 text-center"
+                      style={{
+                        borderColor: `${primaryEmotion.color}33`,
+                        backgroundColor: `${primaryEmotion.color}10`,
+                      }}
+                    >
+                      <div className="text-sm font-bold uppercase tracking-[0.16em]" style={{ color: primaryEmotion.color }}>
+                        Primary emotion
+                      </div>
+                      <div className="mt-4 text-3xl font-black text-[#20160f]">
+                        {primaryEmotion.emoji} {emotion.primary}
+                      </div>
+                      <p className="mt-3 text-base text-[#715845]">Intensity {emotion.intensity}/5</p>
+                    </div>
+
+                    <div className="rounded-2xl border border-[#eadacc] bg-white p-5">
+                      <div className="space-y-4">
+                        {Object.entries(emotion.percentages)
+                          .sort(([, a], [, b]) => b - a)
+                          .filter(([, value]) => value > 0)
+                          .map(([label, value]) => {
+                            const meta = EMOTION_META[label] ?? { emoji: label, color: "#94a3b8" };
+                            return (
+                              <div key={label}>
+                                <div className="mb-2 flex items-center justify-between text-sm">
+                                  <span className="font-semibold text-[#352519]">{meta.emoji} {label}</span>
+                                  <span className="font-bold text-[#8d6b4c]">{value}%</span>
+                                </div>
+                                <div className="h-3 rounded-full bg-[#f6ede5]">
+                                  <div className="h-3 rounded-full" style={{ width: `${value}%`, backgroundColor: meta.color }} />
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-[#eadacc] bg-white p-5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-base text-[#8d6b4c]">Overall sentiment</span>
+                        <span className="text-lg font-black text-[#21160f]">{emotion.sentiment}</span>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex min-h-[320px] items-center justify-center rounded-3xl border border-[#eadacc] bg-white text-center">
+                    <div>
+                      <div className="mx-auto h-16 w-16 rounded-full bg-[#fff1e3]" />
+                      <h3 className="mt-4 text-2xl font-black text-[#1f150f]">Tone and emotion</h3>
+                      <p className="mt-3 max-w-sm text-lg leading-8 text-[#8d6b4c]">
+                        Once you translate a phrase, this panel will show the emotional intent behind it.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </section>
+          </>
+        )}
+
+        {view === "dictionary" && (
+          <>
+            <SectionHeader
+              icon={<BookIcon />}
+              title="Custom Dictionary"
+              subtitle="Manage and contribute to the community slang database."
+              right={<StatCard total={customEntries.length} recent={recentDictionaryAdds} />}
+            />
+
+            <div className="grid gap-6">
+              <section className={`rounded-[26px] border ${frameClass}`}>
+                <div className="border-b border-[#eadccf] px-8 py-8">
+                  <h3 className="text-4xl font-black text-[#1f150f]">Add New Entry</h3>
+                  <p className="mt-2 text-lg text-[#8d6b4c]">Contribute a new phrase to the dictionary.</p>
+                </div>
+
+                <div className="grid gap-6 px-8 py-8">
+                  <Field label="Slang Term (Arabic/Arabizi)">
+                    <InputShell value={dictTerm} onChange={setDictTerm} placeholder="e.g. قشطة" />
+                  </Field>
+
+                  <Field label="Meaning (English)">
+                    <InputShell value={dictMeaning} onChange={setDictMeaning} placeholder="e.g. Cool / Awesome" />
+                  </Field>
+
+                  <Field label="Context / Usage">
+                    <InputShell value={dictContext} onChange={setDictContext} placeholder="When is this typically used?" rows={3} />
+                  </Field>
+
+                  <div className="grid gap-6 md:grid-cols-2">
+                    <Field label="Formality">
+                      <select
+                        value={dictFormality}
+                        onChange={(event) => setDictFormality(event.target.value)}
+                        className="w-full rounded-2xl border border-[#e6d8ca] bg-white px-5 py-4 text-lg text-[#4d3724] outline-none focus:border-[#ffb86a] focus:ring-4 focus:ring-[#ffedd6]"
+                      >
+                        {FORMALITY_OPTIONS.map((option) => (
+                          <option key={option}>{option}</option>
+                        ))}
+                      </select>
+                    </Field>
+
+                    <Field label="Offensiveness">
+                      <select
+                        value={dictOffensiveness}
+                        onChange={(event) => setDictOffensiveness(event.target.value)}
+                        className="w-full rounded-2xl border border-[#e6d8ca] bg-white px-5 py-4 text-lg text-[#4d3724] outline-none focus:border-[#ffb86a] focus:ring-4 focus:ring-[#ffedd6]"
+                      >
+                        {OFFENSIVENESS_OPTIONS.map((option) => (
+                          <option key={option}>{option}</option>
+                        ))}
+                      </select>
+                    </Field>
+                  </div>
+
+                  <button
+                    onClick={addDictionaryEntry}
+                    className="inline-flex items-center justify-center gap-3 rounded-xl bg-[#ff8a1d] px-8 py-4 text-xl font-black text-white shadow-[0_14px_24px_rgba(255,138,29,0.24)] transition hover:bg-[#f37f12]"
+                  >
+                    <PlusIcon />
+                    Add to Dictionary
+                  </button>
+                </div>
+              </section>
+
+              <section className={`rounded-[26px] border border-dashed p-8 text-center ${frameClass}`}>
+                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[#fff1e3] text-[#ff8a1d]">
+                  <UploadIcon />
+                </div>
+                <h3 className="mt-5 text-3xl font-black text-[#1f150f]">Bulk Import</h3>
+                <p className="mt-2 text-lg text-[#8d6b4c]">Upload a CSV or JSON file containing multiple entries.</p>
+                <button
+                  onClick={() => importRef.current?.click()}
+                  className="mt-6 inline-flex min-w-[240px] items-center justify-center rounded-xl border border-[#e6d8ca] bg-white px-6 py-4 text-xl font-bold text-[#21160f] shadow-[0_6px_15px_rgba(84,48,14,0.06)]"
+                >
+                  Select File
+                </button>
+                <input
+                  ref={importRef}
+                  type="file"
+                  accept=".csv,.json"
+                  className="hidden"
+                  onChange={(event) => void importDictionaryFile(event.target.files?.[0] ?? null)}
+                />
+              </section>
+
+              <section className={`rounded-[26px] border ${frameClass}`}>
+                <div className="border-b border-[#eadccf] px-8 py-8">
+                  <h3 className="text-4xl font-black text-[#1f150f]">Dictionary Entries</h3>
+                  <p className="mt-2 text-lg text-[#8d6b4c]">Browse the custom dataset entries.</p>
+                </div>
+
+                {customEntries.length === 0 ? (
+                  <div className="flex min-h-[260px] items-center justify-center px-8 py-12 text-center">
+                    <div>
+                      <div className="mx-auto text-[#ded6cf]">
+                        <EmptyIcon />
+                      </div>
+                      <p className="mt-6 text-3xl font-medium text-[#7b6048]">The dictionary is currently empty.</p>
+                      <p className="mt-3 text-xl text-[#a07f61]">Add a new entry to get started.</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid gap-4 px-8 py-8">
+                    {customEntries.map((entry) => (
+                      <div key={entry.id} className="rounded-2xl border border-[#eadccf] bg-white p-5 shadow-[0_6px_15px_rgba(84,48,14,0.04)]">
+                        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                          <div>
+                            <h4 className="text-2xl font-black text-[#21160f]">{entry.slang}</h4>
+                            <p className="mt-1 text-lg font-semibold text-[#ff8a1d]">{entry.meaning}</p>
+                            {entry.context && <p className="mt-3 text-base leading-7 text-[#765c46]">{entry.context}</p>}
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <span className="rounded-full bg-[#fff3e2] px-3 py-1 text-sm font-semibold text-[#8a6948]">{entry.formality}</span>
+                            <span className="rounded-full bg-[#fff3e2] px-3 py-1 text-sm font-semibold text-[#8a6948]">{entry.offensiveness}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </div>
+          </>
+        )}
+
+        {view === "history" && (
+          <>
+            <SectionHeader
+              icon={<HistoryIcon />}
+              title="Translation History"
+              subtitle="Your private recent slang translations."
+            />
+
+            {!mounted ? (
+              <div className="py-24 text-center text-3xl text-[#8d6b4c]">Loading history...</div>
+            ) : history.length === 0 ? (
+              <div className={`rounded-[26px] border px-8 py-20 text-center ${frameClass}`}>
+                <div className="mx-auto text-[#ded6cf]">
+                  <EmptyIcon />
+                </div>
+                <h3 className="mt-6 text-3xl font-black text-[#1f150f]">No translations yet</h3>
+                <p className="mt-3 text-xl text-[#8d6b4c]">Your recent slang lookups will appear here.</p>
+              </div>
+            ) : (
+              <div className="grid gap-4">
+                {history.map((item) => (
+                  <div key={item.id} className={`rounded-[22px] border p-6 ${frameClass}`}>
+                    <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <div className="mb-2 flex flex-wrap items-center gap-2">
+                          <span className="rounded-full bg-[#fff3e2] px-3 py-1 text-sm font-semibold text-[#8a6948]">{item.source}</span>
+                          <span className="rounded-full bg-[#fff3e2] px-3 py-1 text-sm font-semibold text-[#8a6948]">{item.mode}</span>
+                          <span className="rounded-full bg-[#fff3e2] px-3 py-1 text-sm font-semibold text-[#8a6948]">{TONE_LABELS[item.tone] ?? item.tone}</span>
+                        </div>
+                        <h3 className="text-2xl font-black text-[#21160f]">{item.input}</h3>
+                        <p className="mt-2 text-lg leading-8 text-[#765c46]">{item.translation}</p>
+                      </div>
+                      <div className="text-sm font-semibold text-[#9c7a5a]">{formatRelativeDate(item.createdAt)}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
       </div>
     </main>
   );
