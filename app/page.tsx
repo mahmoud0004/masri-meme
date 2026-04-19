@@ -3,65 +3,282 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { detectEmotions } from "@/lib/emotions";
-import { translateMeme, getEmotionFromDictionary } from "@/lib/translations";
 import { extractTextFromFile } from "@/lib/ocr";
+import { getEmotionFromDictionary, translateMeme } from "@/lib/translations";
 import type { EmotionResult } from "@/lib/emotions";
 import type { TranslationResult } from "@/lib/translations";
 
 type Tab = "text" | "voice" | "media";
+type UiLanguage = "en" | "ar";
 
 const EMOTION_META: Record<string, { emoji: string; color: string }> = {
-  فرحان:   { emoji: "😄", color: "#FFD700" },
-  غاضب:    { emoji: "😤", color: "#FF4444" },
-  زعلان:   { emoji: "😢", color: "#6B8CFF" },
-  ساخر:    { emoji: "😏", color: "#FF8C42" },
-  متحمس:   { emoji: "🤩", color: "#00E5A0" },
-  متضايق:  { emoji: "😒", color: "#C084FC" },
-  خايف:    { emoji: "😰", color: "#94A3B8" },
-  مبسوط:   { emoji: "😂", color: "#FB923C" },
+  فرحان: { emoji: "😄", color: "#F59E0B" },
+  غاضب: { emoji: "😤", color: "#F97316" },
+  زعلان: { emoji: "🥲", color: "#60A5FA" },
+  ساخر: { emoji: "😏", color: "#FB7185" },
+  متحمس: { emoji: "🤩", color: "#14B8A6" },
+  متضايق: { emoji: "😒", color: "#A78BFA" },
+  خايف: { emoji: "😰", color: "#94A3B8" },
+  مبسوط: { emoji: "😊", color: "#22C55E" },
 };
 
 const TONE_COLORS: Record<string, string> = {
-  سخرية: "#FF8C42",
-  غضب:   "#FF4444",
-  فرح:   "#FFD700",
-  حب:    "#F472B6",
-  تحمس:  "#00E5A0",
-  حزن:   "#6B8CFF",
-  تعجب:  "#A78BFA",
-  عادي:  "#94A3B8",
+  سخرية: "#FB7185",
+  غضب: "#F97316",
+  فرح: "#EAB308",
+  حب: "#F43F5E",
+  تحمس: "#14B8A6",
+  حزن: "#60A5FA",
+  تعجب: "#A78BFA",
+  عادي: "#94A3B8",
 };
 
-const EXAMPLES = [
-  "متعملش فيها ناصح",
-  "إيه ده يسطا",
-  "أنا اتخنقت",
-  "يا روح قلبي",
-  "ده أنا مبسوطه",
-  "كسرت بخاطري",
-  "يا عم ده اكتشاف",
-  "حاجة تجنن",
-];
+const UI_COPY = {
+  en: {
+    langLabel: "Language",
+    langSwitch: "العربية",
+    badge: "Studio for Egyptian Meme Intelligence",
+    titleLead: "Egyptian Meme",
+    titleAccent: "Translator",
+    hero:
+      "Turn the project into a smarter tool that understands full sentences, listens to voice, extracts text from images or video, and presents translation, tone, and emotion in a polished interface.",
+    chips: ["100% local", "New sentences", "Image + video OCR", "Emotion analysis"],
+    featureCards: [
+      {
+        title: "Sentence Understanding",
+        body: "Not just memorized phrases. The app now tries to interpret unseen Egyptian Arabic sentences too.",
+      },
+      {
+        title: "Voice, Image, and Video",
+        body: "Type, speak, or upload media and let the local analysis pipeline do the heavy lifting.",
+      },
+      {
+        title: "Meaning + Emotion",
+        body: "Each result combines translation, tone, confidence, and emotional breakdown in one view.",
+      },
+    ],
+    inputStudio: "Input Studio",
+    inputTitle: "Enter your meme any way you like",
+    tabText: "Text",
+    tabVoice: "Voice",
+    tabMedia: "Image / Video",
+    writeAnything: "WRITE ANYTHING",
+    textPlaceholder:
+      'Example: "أنا مخنوق من الشغل النهارده"\nOr: "إيه اللي بيحصل ده؟"\nOr: "يا روح قلبي وحشتني"',
+    clear: "Clear",
+    analyze: "Analyze Meaning",
+    voiceBody: "Speak in Egyptian Arabic and the app will convert the speech into text, then interpret it.",
+    micDenied: "Microphone access is blocked. Allow it in the browser first.",
+    voiceIdle: "Tap and start speaking",
+    voiceRec: "Listening...",
+    voiceDone: "Voice captured",
+    transcript: "VOICE TRANSCRIPT",
+    transcriptPlaceholder: "The heard text will appear here, and you can edit it manually.",
+    analyzeVoice: "Analyze Voice Text",
+    mediaBody: "Upload a meme image or a short video and the app will extract visible text locally, then interpret it.",
+    dropTitle: "Drag a file here or click to browse",
+    extracted: "EXTRACTED TEXT",
+    processMedia: "Extract Text and Analyze Meaning",
+    insights: "Insight Panel",
+    insightsTitle: "Smart Result",
+    loading: "Preparing translation and analysis...",
+    confidence: "Confidence",
+    flexible: "Flexible interpretation",
+    original: "ORIGINAL",
+    interpretation: "INTERPRETATION",
+    why: "WHY THIS RESULT",
+    matched: "MATCHED EXPRESSIONS",
+    intensity: "Emotion intensity",
+    sentiment: "Overall sentiment",
+    positive: "Positive",
+    negative: "Negative",
+    neutral: "Neutral",
+    ready: "Ready to analyze",
+    readyBody:
+      "Type a sentence, record voice, or upload an image or video, and the app will show meaning, tone, and emotion analysis.",
+    modeLabels: {
+      dictionary: "Precise dictionary",
+      hybrid: "Smart hybrid",
+      inference: "Flexible inference",
+    },
+    toneLabels: {
+      سخرية: "Sarcasm",
+      غضب: "Anger",
+      فرح: "Joy",
+      حب: "Love",
+      تحمس: "Excitement",
+      حزن: "Sadness",
+      تعجب: "Surprise",
+      عادي: "Neutral",
+    },
+    emotionLabels: {
+      فرحان: "Happy",
+      غاضب: "Angry",
+      زعلان: "Upset",
+      ساخر: "Sarcastic",
+      متحمس: "Excited",
+      متضايق: "Annoyed",
+      خايف: "Afraid",
+      مبسوط: "Glad",
+    },
+    examples: [
+      "متعملش فيها ناصح",
+      "أنا تعبان ومش قادر أكمل",
+      "هو إيه اللي بيحصل ده؟",
+      "يا روح قلبي",
+      "حاجة تجنن",
+      "أنا مخنوق من الشغل النهارده",
+    ],
+    errors: {
+      emptyInput: "Write a sentence or phrase first.",
+      browserVoice: "This browser does not support voice input. Try Chrome or Edge.",
+      micBlocked: "Microphone access is blocked. Allow it from your browser settings.",
+      micMissing: "No microphone is available on this device.",
+      micAccess: "Could not access the microphone: ",
+      micRejected: "Microphone use was denied.",
+      noSpeech: "No clear speech was detected. Try again.",
+      audioCapture: "The microphone is in use by another app or unavailable.",
+      voiceIssue: "A speech recognition error occurred.",
+      voiceStart: "Failed to start recording: ",
+      fileTooLarge: "The file is larger than 30MB.",
+      fileType: "Upload an image or video only.",
+      noMedia: "Upload an image or video first.",
+      unclearText: "I could not read clear text from the file. Try a clearer file.",
+      fileFailed: "Failed to analyze the file.",
+      analysisFailed: "Something went wrong during analysis.",
+    },
+  },
+  ar: {
+    langLabel: "اللغة",
+    langSwitch: "English",
+    badge: "منصة ذكية لفهم الميمز المصرية",
+    titleLead: "مترجم",
+    titleAccent: "الميمز المصرية",
+    hero:
+      "خلّينا نحوّل المشروع إلى أداة أذكى تفهم الجمل، تلتقط الكلام من الصوت، تستخرج النص من الصور أو الفيديو، وتعرض الترجمة والنبرة والمشاعر في واجهة احترافية.",
+    chips: ["محلي 100%", "جمل جديدة", "OCR للصورة والفيديو", "تحليل مشاعر"],
+    featureCards: [
+      {
+        title: "فهم الجمل",
+        body: "ليس مجرد عبارات محفوظة، بل محاولة لفهم الجمل المصرية الجديدة أيضًا.",
+      },
+      {
+        title: "صوت وصورة وفيديو",
+        body: "اكتب أو اتكلم أو ارفع وسائط، وسيكمل التحليل المحلي باقي المهمة.",
+      },
+      {
+        title: "معنى + مشاعر",
+        body: "كل نتيجة تجمع بين الترجمة والنبرة والثقة وتحليل المشاعر في مكان واحد.",
+      },
+    ],
+    inputStudio: "منطقة الإدخال",
+    inputTitle: "أدخل الميم بأي طريقة تحبها",
+    tabText: "نص",
+    tabVoice: "صوت",
+    tabMedia: "صورة / فيديو",
+    writeAnything: "اكتب أي شيء",
+    textPlaceholder:
+      'مثال: "أنا مخنوق من الشغل النهارده"\nأو: "إيه اللي بيحصل ده؟"\nأو: "يا روح قلبي وحشتني"',
+    clear: "مسح",
+    analyze: "حلّل المعنى",
+    voiceBody: "اتكلم بالمصري، وسيتم تحويل الكلام إلى نص ثم تفسيره.",
+    micDenied: "الميكروفون مقفول. اسمح بالوصول من المتصفح أولًا.",
+    voiceIdle: "اضغط وابدأ الكلام",
+    voiceRec: "جاري الاستماع...",
+    voiceDone: "تم تسجيل الصوت",
+    transcript: "النص الصوتي",
+    transcriptPlaceholder: "النص الذي تم سماعه سيظهر هنا، ويمكنك تعديله يدويًا.",
+    analyzeVoice: "حلّل النص الصوتي",
+    mediaBody: "ارفع صورة ميم أو فيديو قصير، وسيتم استخراج النص المرئي محليًا ثم تفسيره.",
+    dropTitle: "اسحب الملف هنا أو اضغط للاختيار",
+    extracted: "النص المستخرج",
+    processMedia: "استخرج النص وحلّل المعنى",
+    insights: "لوحة النتائج",
+    insightsTitle: "النتيجة الذكية",
+    loading: "جاري تجهيز الترجمة والتحليل...",
+    confidence: "ثقة",
+    flexible: "تفسير مرن",
+    original: "الأصل",
+    interpretation: "التفسير",
+    why: "سبب النتيجة",
+    matched: "العبارات المتطابقة",
+    intensity: "شدة الإحساس",
+    sentiment: "التوجه العام",
+    positive: "إيجابي",
+    negative: "سلبي",
+    neutral: "محايد",
+    ready: "جاهز للتحليل",
+    readyBody:
+      "اكتب جملة، سجّل صوتًا، أو ارفع صورة أو فيديو، وسيعرض التطبيق المعنى والنبرة وتحليل المشاعر.",
+    modeLabels: {
+      dictionary: "قاموس دقيق",
+      hybrid: "هجين ذكي",
+      inference: "استنتاج مرن",
+    },
+    toneLabels: {
+      سخرية: "سخرية",
+      غضب: "غضب",
+      فرح: "فرح",
+      حب: "حب",
+      تحمس: "تحمس",
+      حزن: "حزن",
+      تعجب: "تعجب",
+      عادي: "عادي",
+    },
+    emotionLabels: {
+      فرحان: "فرحان",
+      غاضب: "غاضب",
+      زعلان: "زعلان",
+      ساخر: "ساخر",
+      متحمس: "متحمس",
+      متضايق: "متضايق",
+      خايف: "خايف",
+      مبسوط: "مبسوط",
+    },
+    examples: [
+      "متعملش فيها ناصح",
+      "أنا تعبان ومش قادر أكمل",
+      "هو إيه اللي بيحصل ده؟",
+      "يا روح قلبي",
+      "حاجة تجنن",
+      "أنا مخنوق من الشغل النهارده",
+    ],
+    errors: {
+      emptyInput: "اكتب جملة أو phrase الأول.",
+      browserVoice: "المتصفح الحالي لا يدعم الإدخال الصوتي. جرّب Chrome أو Edge.",
+      micBlocked: "الميكروفون مقفول. اسمح بالوصول من إعدادات المتصفح.",
+      micMissing: "مفيش ميكروفون متاح على الجهاز.",
+      micAccess: "تعذر الوصول للميكروفون: ",
+      micRejected: "تم رفض استخدام الميكروفون.",
+      noSpeech: "مافيش صوت واضح. جرّب مرة تانية.",
+      audioCapture: "الميكروفون مستخدم من تطبيق تاني أو غير متاح.",
+      voiceIssue: "حصلت مشكلة أثناء التعرف الصوتي.",
+      voiceStart: "فشل تشغيل التسجيل: ",
+      fileTooLarge: "الملف أكبر من 30MB.",
+      fileType: "ارفع صورة أو فيديو فقط.",
+      noMedia: "ارفع صورة أو فيديو الأول.",
+      unclearText: "لم أتمكن من قراءة نص واضح من الملف. جرّب ملفًا أوضح.",
+      fileFailed: "فشل تحليل الملف.",
+      analysisFailed: "حصل خطأ أثناء التحليل.",
+    },
+  },
+} as const;
 
 function Spinner() {
-  return (
-    <div className="w-5 h-5 rounded-full border-2 border-white/15 border-t-violet-400 animate-spin flex-shrink-0" />
-  );
+  return <div className="h-5 w-5 animate-spin rounded-full border-2 border-white/15 border-t-[#14B8A6]" />;
 }
 
 function WaveViz({ active }: { active: boolean }) {
   return (
-    <div className="flex items-center justify-center gap-[3px] h-10 my-3">
-      {[...Array(14)].map((_, i) => (
+    <div className="my-4 flex h-12 items-center justify-center gap-1">
+      {Array.from({ length: 18 }).map((_, index) => (
         <div
-          key={i}
-          className="w-[3px] rounded-full transition-all duration-150"
+          key={index}
+          className="w-1 rounded-full transition-all duration-200"
           style={{
-            background: active ? "#a78bfa" : "rgba(167,139,250,.2)",
-            height: active ? `${10 + ((i * 7 + 5) % 24)}px` : "3px",
-            animation: active
-              ? `waveBar .7s ease-in-out ${i * 0.055}s infinite alternate`
-              : "none",
+            height: active ? `${14 + ((index * 11 + 7) % 28)}px` : "4px",
+            background: active ? "#14B8A6" : "rgba(255,255,255,.16)",
+            animation: active ? `waveBar .8s ease-in-out ${index * 0.04}s infinite alternate` : "none",
           }}
         />
       ))}
@@ -69,24 +286,34 @@ function WaveViz({ active }: { active: boolean }) {
   );
 }
 
-function EmotionBar({ label, value, color, emoji }: {
-  label: string; value: number; color: string; emoji: string;
+function EmotionBar({
+  label,
+  value,
+  color,
+  emoji,
+}: {
+  label: string;
+  value: number;
+  color: string;
+  emoji: string;
 }) {
   return (
-    <div className="flex items-center gap-3 mb-2.5">
-      <span className="text-lg w-6 text-center flex-shrink-0">{emoji}</span>
-      <div className="flex-1 min-w-0">
-        <div className="flex justify-between mb-1">
-          <span className="text-xs text-white/55 font-semibold">{label}</span>
-          <span className="text-xs font-black tabular-nums" style={{ color }}>{value}%</span>
+    <div className="mb-3 flex items-center gap-3">
+      <span className="w-7 text-center text-lg">{emoji}</span>
+      <div className="min-w-0 flex-1">
+        <div className="mb-1 flex items-center justify-between gap-3">
+          <span className="truncate text-xs font-semibold text-white/65">{label}</span>
+          <span className="text-xs font-black tabular-nums" style={{ color }}>
+            {value}%
+          </span>
         </div>
-        <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+        <div className="h-2 overflow-hidden rounded-full bg-white/6">
           <motion.div
             initial={{ width: 0 }}
             animate={{ width: `${value}%` }}
-            transition={{ duration: 1.1, ease: [0.22, 1, 0.36, 1], delay: 0.05 }}
+            transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
             className="h-full rounded-full"
-            style={{ background: `linear-gradient(90deg, ${color}50, ${color})` }}
+            style={{ background: `linear-gradient(90deg, ${color}66, ${color})` }}
           />
         </div>
       </div>
@@ -95,69 +322,105 @@ function EmotionBar({ label, value, color, emoji }: {
 }
 
 export default function Home() {
+  const [uiLang, setUiLang] = useState<UiLanguage>("en");
   const [tab, setTab] = useState<Tab>("text");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // text
   const [txt, setTxt] = useState("");
 
-  // voice
   const [vState, setVState] = useState<"idle" | "rec" | "done">("idle");
   const [vText, setVText] = useState("");
   const [micPerm, setMicPerm] = useState<"unknown" | "granted" | "denied">("unknown");
   const recRef = useRef<any>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  // media
   const [mFile, setMFile] = useState<File | null>(null);
   const [mUrl, setMUrl] = useState<string | null>(null);
   const [mExtracted, setMExtracted] = useState("");
   const [drag, setDrag] = useState(false);
 
-  // results
   const [trans, setTrans] = useState<TranslationResult | null>(null);
   const [emo, setEmo] = useState<EmotionResult | null>(null);
+
+  const copy = UI_COPY[uiLang];
+  const dir = uiLang === "ar" ? "rtl" : "ltr";
+  const textAlignClass = uiLang === "ar" ? "text-right" : "text-left";
+
+  useEffect(() => {
+    const savedLang = window.localStorage.getItem("ui-language");
+    if (savedLang === "en" || savedLang === "ar") {
+      setUiLang(savedLang);
+    }
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.lang = uiLang;
+    document.documentElement.dir = dir;
+    window.localStorage.setItem("ui-language", uiLang);
+  }, [dir, uiLang]);
 
   useEffect(() => {
     navigator.permissions
       ?.query({ name: "microphone" as PermissionName })
-      .then((s) => {
-        setMicPerm(s.state === "granted" ? "granted" : s.state === "denied" ? "denied" : "unknown");
-        s.onchange = () =>
-          setMicPerm(s.state === "granted" ? "granted" : s.state === "denied" ? "denied" : "unknown");
+      .then((status) => {
+        const syncState = () =>
+          setMicPerm(
+            status.state === "granted" ? "granted" : status.state === "denied" ? "denied" : "unknown",
+          );
+
+        syncState();
+        status.onchange = syncState;
       })
       .catch(() => {});
   }, []);
 
-  // ── process ──────────────────────────────────────────────────────────────────
-  function process(input: string) {
-    if (!input.trim()) { setError("من فضلك أدخل نص أولاً"); return; }
+  useEffect(() => {
+    return () => {
+      if (mUrl) URL.revokeObjectURL(mUrl);
+    };
+  }, [mUrl]);
+
+  function toggleLanguage() {
+    setUiLang((current) => (current === "en" ? "ar" : "en"));
+  }
+
+  function runAnalysis(input: string) {
+    if (!input.trim()) {
+      setError(copy.errors.emptyInput);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setTrans(null);
     setEmo(null);
 
-    setTimeout(() => {
+    window.setTimeout(() => {
       try {
-        const t = translateMeme(input);
-        const e = t.found
-          ? getEmotionFromDictionary(input)
-          : detectEmotions(input);
-        setTrans(t);
-        setEmo(e);
+        const nextTranslation = translateMeme(input);
+        const nextEmotion = nextTranslation.found ? getEmotionFromDictionary(input) : detectEmotions(input);
+        setTrans(nextTranslation);
+        setEmo(nextEmotion);
       } catch (err: any) {
-        setError(err?.message ?? "حصل خطأ");
+        setError(err?.message ?? copy.errors.analysisFailed);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
-    }, 500);
+    }, 400);
   }
 
-  // ── voice ─────────────────────────────────────────────────────────────────────
   async function startVoice() {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) { setError("المتصفح مش بيدعم الصوت — استخدم Chrome أو Edge"); return; }
-    setError(null); setTrans(null); setEmo(null); setVText("");
+    if (!SR) {
+      setError(copy.errors.browserVoice);
+      return;
+    }
+
+    setError(null);
+    setTrans(null);
+    setEmo(null);
+    setVText("");
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -167,10 +430,10 @@ export default function Home() {
       setMicPerm("denied");
       setError(
         err?.name === "NotAllowedError"
-          ? "الميكروفون محجوب — اضغط أيقونة القفل في المتصفح واسمح"
+          ? copy.errors.micBlocked
           : err?.name === "NotFoundError"
-          ? "مفيش ميكروفون على الجهاز ده"
-          : "مش قادر يوصل للميكروفون: " + (err?.message ?? "")
+            ? copy.errors.micMissing
+            : `${copy.errors.micAccess}${err?.message ?? ""}`,
       );
       return;
     }
@@ -184,57 +447,82 @@ export default function Home() {
     setVState("rec");
 
     rec.onresult = (event: any) => {
-      let t = "";
-      for (let i = event.resultIndex; i < event.results.length; i++)
-        t += event.results[i][0].transcript;
-      if (t.trim()) setVText(t);
+      let heard = "";
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        heard += event.results[index][0].transcript;
+      }
+      if (heard.trim()) setVText(heard);
     };
 
     rec.onerror = (event: any) => {
-      const msgs: Record<string, string> = {
-        "not-allowed": "الميكروفون محجوب — سمح من إعدادات المتصفح",
-        "no-speech": "مسمعتش صوت، جرب تاني",
-        "audio-capture": "الميكروفون شغال مع تطبيق تاني",
-        "network": "خطأ في الشبكة",
+      const messages: Record<string, string> = {
+        "not-allowed": copy.errors.micRejected,
+        "no-speech": copy.errors.noSpeech,
+        "audio-capture": copy.errors.audioCapture,
+        network: copy.errors.voiceIssue,
       };
-      setError(msgs[event.error] ?? `خطأ: ${event.error}`);
+
+      setError(messages[event.error] ?? `${copy.errors.voiceIssue}: ${event.error}`);
       setVState("idle");
       stopStream();
     };
 
-    rec.onend = () => { setVState("done"); stopStream(); };
+    rec.onend = () => {
+      setVState("done");
+      stopStream();
+    };
 
-    try { rec.start(); } catch (err: any) {
-      setError("فشل التسجيل: " + (err?.message ?? ""));
+    try {
+      rec.start();
+    } catch (err: any) {
+      setError(`${copy.errors.voiceStart}${err?.message ?? ""}`);
       setVState("idle");
       stopStream();
     }
   }
 
-  function stopVoice() { recRef.current?.stop(); stopStream(); setVState("done"); }
   function stopStream() {
-    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
   }
 
-  // ── media ─────────────────────────────────────────────────────────────────────
+  function stopVoice() {
+    recRef.current?.stop();
+    stopStream();
+    setVState("done");
+  }
+
   function loadFile(file: File | null) {
     if (!file) return;
-    if (file.size > 15 * 1024 * 1024) { setError("الملف أكبر من 15MB"); return; }
-    if (!file.type.startsWith("image/")) {
-      setError("ارفع صورة بس — الفيديو مش متدعوم في النسخة دي");
+
+    if (file.size > 30 * 1024 * 1024) {
+      setError(copy.errors.fileTooLarge);
       return;
     }
-    setMFile(file);
-    setMUrl(URL.createObjectURL(file));
-    setMExtracted("");
+
+    const topLevelType = file.type.split("/")[0];
+    if (!["image", "video"].includes(topLevelType)) {
+      setError(copy.errors.fileType);
+      return;
+    }
+
+    setError(null);
     setTrans(null);
     setEmo(null);
-    setError(null);
+    setMExtracted("");
+    setMFile(file);
+    setMUrl((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return URL.createObjectURL(file);
+    });
   }
 
   async function processMedia() {
-    if (!mFile) { setError("ارفع صورة أولاً"); return; }
+    if (!mFile) {
+      setError(copy.errors.noMedia);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setTrans(null);
@@ -243,438 +531,456 @@ export default function Home() {
 
     try {
       const extracted = await extractTextFromFile(mFile);
-      if (!extracted.trim()) throw new Error("مش لاقي نص في الصورة — جرب صورة أوضح");
+      if (!extracted.trim()) {
+        throw new Error(copy.errors.unclearText);
+      }
+
       setMExtracted(extracted);
-      const t = translateMeme(extracted);
-      const e = t.found ? getEmotionFromDictionary(extracted) : detectEmotions(extracted);
-      setTrans(t);
-      setEmo(e);
+      const nextTranslation = translateMeme(extracted);
+      const nextEmotion = nextTranslation.found ? getEmotionFromDictionary(extracted) : detectEmotions(extracted);
+      setTrans(nextTranslation);
+      setEmo(nextEmotion);
     } catch (err: any) {
-      setError(err?.message ?? "فشل تحليل الصورة");
+      setError(err?.message ?? copy.errors.fileFailed);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
-  // ── helpers ───────────────────────────────────────────────────────────────────
-  const primMeta = emo ? (EMOTION_META[emo.primary] ?? { emoji: "🎭", color: "#888" }) : null;
-  const toneColor = trans ? (TONE_COLORS[trans.tone] ?? "#94A3B8") : "#94A3B8";
+  const primaryEmotion = emo ? EMOTION_META[emo.primary] ?? { emoji: "🎭", color: "#94A3B8" } : null;
+  const toneColor = trans ? TONE_COLORS[trans.tone] ?? "#94A3B8" : "#94A3B8";
+  const modeMeta = trans
+    ? { label: copy.modeLabels[trans.mode], color: trans.mode === "dictionary" ? "#14B8A6" : trans.mode === "hybrid" ? "#F59E0B" : "#A78BFA" }
+    : null;
+  const mediaKind = mFile?.type.startsWith("video/") ? "video" : "image";
 
-  const tabCls = (id: Tab) =>
-    `flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-bold transition-all duration-200 ${
+  const tabClassName = (id: Tab) =>
+    `rounded-full px-4 py-2.5 text-sm font-bold transition-all duration-200 ${
       tab === id
-        ? "bg-violet-600 text-white shadow-lg shadow-violet-500/30"
-        : "bg-white/4 text-white/45 hover:bg-white/8 hover:text-white border border-white/8"
+        ? "bg-[#0F766E] text-white shadow-[0_12px_30px_rgba(20,184,166,0.35)]"
+        : "border border-white/10 bg-white/5 text-white/55 hover:bg-white/10 hover:text-white"
     }`;
 
-  // ── JSX ───────────────────────────────────────────────────────────────────────
   return (
-    <main className="min-h-screen bg-[#0A0A0F] text-white" dir="rtl">
+    <main className="min-h-screen overflow-hidden bg-[#07111A] text-white" dir={dir}>
       <style>{`
-        @keyframes waveBar { from { transform:scaleY(.3); } to { transform:scaleY(1); } }
-        @keyframes shimmer { 100% { transform:translateX(200%); } }
-        textarea:focus { outline:none; border-color:rgba(124,58,237,.5) !important; }
+        @keyframes waveBar { from { transform: scaleY(.35); } to { transform: scaleY(1); } }
+        @keyframes glowFloat { 0%,100% { transform: translateY(0px); } 50% { transform: translateY(-10px); } }
       `}</style>
 
-      {/* Ambient */}
-      <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden">
-        <div className="absolute -top-40 left-8 w-[500px] h-[500px] rounded-full bg-violet-600/10 blur-[110px]" />
-        <div className="absolute bottom-0 right-0 w-[400px] h-[400px] rounded-full bg-fuchsia-600/8 blur-[100px]" />
+      <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(20,184,166,.18),_transparent_32%),radial-gradient(circle_at_85%_15%,_rgba(244,63,94,.16),_transparent_26%),radial-gradient(circle_at_50%_100%,_rgba(96,165,250,.14),_transparent_30%),linear-gradient(180deg,#07111A_0%,#0B1220_100%)]" />
+        <div className="absolute left-[6%] top-24 h-48 w-48 rounded-full bg-[#14B8A6]/10 blur-3xl [animation:glowFloat_8s_ease-in-out_infinite]" />
+        <div className="absolute right-[8%] top-40 h-56 w-56 rounded-full bg-[#F43F5E]/10 blur-3xl [animation:glowFloat_10s_ease-in-out_infinite]" />
       </div>
 
-      <div className="max-w-xl mx-auto px-4 py-10 pb-16">
-
-        {/* Header */}
-        <motion.div
-          initial={{ opacity: 0, y: -14 }}
+      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8 lg:py-12">
+        <motion.section
+          initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className="text-center mb-9"
+          transition={{ duration: 0.55 }}
+          className="mb-8 rounded-[28px] border border-white/10 bg-white/[0.04] p-6 shadow-[0_20px_80px_rgba(0,0,0,0.35)] backdrop-blur-xl lg:p-8"
         >
-          <div className="inline-flex items-center gap-2 bg-violet-500/10 border border-violet-500/20 rounded-full px-4 py-1.5 text-[11px] text-violet-300 mb-4 font-bold tracking-wide">
-            <span className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse" />
-            مجاني 100% · بدون API · بدون إنترنت
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+            <div className="inline-flex items-center gap-2 rounded-full border border-[#14B8A6]/30 bg-[#14B8A6]/10 px-4 py-1.5 text-xs font-bold text-[#99F6E4]">
+              <span className="h-2 w-2 rounded-full bg-[#5EEAD4]" />
+              {copy.badge}
+            </div>
+
+            <button
+              onClick={toggleLanguage}
+              className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white/80 transition hover:bg-white/10"
+            >
+              <span className="text-white/55">{copy.langLabel}</span>
+              <span>{copy.langSwitch}</span>
+            </button>
           </div>
-          <h1 className="text-[clamp(2rem,8vw,2.8rem)] font-black leading-[1.1] mb-3">
-            <span className="text-white">مترجم </span>
-            <span className="bg-gradient-to-l from-violet-400 to-fuchsia-400 text-transparent bg-clip-text">
-              الميمز المصرية
-            </span>
-          </h1>
-          <p className="text-white/40 text-sm leading-relaxed max-w-xs mx-auto">
-            ترجمة ذكية للهجة المصرية — نص أو صوت أو صور
-            <br />
-            <span className="text-violet-400">+ تحليل المشاعر بالنسبة المئوية 🧠</span>
-          </p>
-        </motion.div>
 
-        {/* Tabs */}
-        <div className="flex justify-center gap-2 mb-5 flex-wrap">
-          <button className={tabCls("text")}  onClick={() => setTab("text")} >✍️ نص</button>
-          <button className={tabCls("voice")} onClick={() => setTab("voice")}>🎤 صوت</button>
-          <button className={tabCls("media")} onClick={() => setTab("media")}>🖼️ صورة</button>
-        </div>
+          <div className="grid gap-8 lg:grid-cols-[1.3fr_.9fr] lg:items-center">
+            <div className={textAlignClass}>
+              <h1 className="max-w-3xl text-[clamp(2.4rem,7vw,5rem)] font-black leading-[0.95] tracking-tight">
+                {copy.titleLead}
+                <span className="block bg-[linear-gradient(135deg,#67E8F9_0%,#14B8A6_45%,#F9A8D4_100%)] bg-clip-text text-transparent">
+                  {copy.titleAccent}
+                </span>
+              </h1>
 
-        {/* Input card */}
-        <motion.div
-          layout
-          className="bg-[#111118] border border-white/7 rounded-2xl p-5 mb-3 shadow-2xl shadow-black/50"
-        >
-          <AnimatePresence mode="wait">
+              <p className="mt-5 max-w-2xl text-base leading-8 text-white/70 sm:text-lg">{copy.hero}</p>
 
-            {/* TEXT */}
-            {tab === "text" && (
-              <motion.div key="text" initial={{ opacity:0, y:8 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0 }}>
-                <p className="text-[11px] text-white/30 font-bold tracking-wider mb-2">اكتب الميم أو العبارة المصرية</p>
-                <textarea
-                  value={txt}
-                  onChange={(e) => setTxt(e.target.value)}
-                  onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter") process(txt); }}
-                  placeholder={"مثال: \"متعملش فيها ناصح\"\nأو: \"إيه ده يسطا!\"\nأو: \"أنا اتخنقت\""}
-                  rows={4}
-                  className="w-full bg-black/25 border border-white/7 rounded-xl p-4 text-white placeholder-white/18 resize-none text-[15px] leading-relaxed transition-colors font-[inherit]"
-                />
-                <div className="flex gap-1.5 flex-wrap mt-3">
-                  {EXAMPLES.map((ex) => (
-                    <button
-                      key={ex}
-                      onClick={() => setTxt(ex)}
-                      className="text-[11px] bg-white/3 border border-white/7 hover:border-violet-500/40 hover:bg-violet-500/10 hover:text-violet-300 px-2.5 py-1 rounded-full text-white/40 transition-all"
-                    >
-                      {ex}
-                    </button>
-                  ))}
-                </div>
-                <div className="flex gap-2 mt-4">
-                  <button
-                    onClick={() => setTxt("")}
-                    className="px-4 py-2.5 rounded-xl bg-white/4 border border-white/7 text-sm text-white/45 hover:bg-white/7 transition-all font-semibold"
-                  >
-                    مسح
-                  </button>
-                  <button
-                    onClick={() => process(txt)}
-                    disabled={loading}
-                    className="mr-auto flex items-center gap-2 px-6 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-sm font-black shadow-lg shadow-violet-500/25 transition-all"
-                  >
-                    {loading ? <Spinner /> : "✨"}
-                    {loading ? "بيترجم..." : "ترجم الميم"}
-                  </button>
-                </div>
-                <p className="text-center text-[10px] text-white/15 mt-2">Ctrl + Enter</p>
-              </motion.div>
-            )}
-
-            {/* VOICE */}
-            {tab === "voice" && (
-              <motion.div key="voice" initial={{ opacity:0, y:8 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0 }}>
-                <p className="text-sm text-white/40 text-center mb-4 leading-relaxed">
-                  اتكلم بالعربي المصري — هيترجم ويحلل مشاعرك
-                  <br />
-                  <span className="text-violet-400 text-xs">المتصفح هيطلب إذن الميكروفون أول مرة</span>
-                </p>
-
-                {micPerm === "denied" && (
-                  <div className="mb-4 bg-amber-500/8 border border-amber-500/20 rounded-xl p-3 text-xs text-amber-200 text-center">
-                    🔒 الميكروفون محجوب — اضغط أيقونة القفل في المتصفح واسمح
+              <div className="mt-6 flex flex-wrap gap-3">
+                {copy.chips.map((chip) => (
+                  <div key={chip} className="rounded-full border border-white/10 bg-white/6 px-4 py-2 text-sm text-white/80">
+                    {chip}
                   </div>
-                )}
-
-                <WaveViz active={vState === "rec"} />
-
-                <p className={`text-center text-sm my-3 font-bold transition-colors ${vState === "rec" ? "text-red-400" : "text-white/30"}`}>
-                  {vState === "idle" && "اضغط الزر وابدأ الكلام"}
-                  {vState === "rec"  && "🔴 بيسمعك... اتكلم"}
-                  {vState === "done" && "✅ خلصت — اضغط ترجم"}
-                </p>
-
-                <div className="flex justify-center mb-5">
-                  {vState !== "rec" ? (
-                    <button
-                      onClick={startVoice}
-                      disabled={loading || micPerm === "denied"}
-                      className="w-16 h-16 rounded-full bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-2xl shadow-lg shadow-violet-500/30 transition-all hover:scale-105 active:scale-95"
-                    >
-                      🎤
-                    </button>
-                  ) : (
-                    <button
-                      onClick={stopVoice}
-                      className="w-16 h-16 rounded-full bg-red-500 hover:bg-red-400 text-2xl shadow-lg shadow-red-500/30 transition-all hover:scale-105 active:scale-95 animate-pulse"
-                    >
-                      ⏹️
-                    </button>
-                  )}
-                </div>
-
-                {vText && (
-                  <div className="bg-black/20 border border-white/7 rounded-xl p-4 mb-4">
-                    <p className="text-[11px] text-white/30 mb-1">اللي اتسمع:</p>
-                    <p className="text-white text-sm leading-relaxed">{vText}</p>
-                  </div>
-                )}
-
-                <div className="border-t border-white/7 pt-4">
-                  <p className="text-[11px] text-white/25 text-center mb-2">أو اكتب يدوي</p>
-                  <textarea
-                    value={vText}
-                    onChange={(e) => setVText(e.target.value)}
-                    placeholder="اكتب هنا..."
-                    rows={2}
-                    className="w-full bg-black/20 border border-white/7 rounded-xl p-3 text-white placeholder-white/18 resize-none text-sm transition-colors font-[inherit]"
-                  />
-                </div>
-
-                <button
-                  onClick={() => process(vText)}
-                  disabled={loading || !vText.trim()}
-                  className="w-full mt-4 py-3 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:opacity-40 font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-violet-500/25 transition-all"
-                >
-                  {loading ? <Spinner /> : "🎭"}
-                  {loading ? "بيحلل..." : "ترجم وحلل المشاعر"}
-                </button>
-              </motion.div>
-            )}
-
-            {/* MEDIA */}
-            {tab === "media" && (
-              <motion.div key="media" initial={{ opacity:0, y:8 }} animate={{ opacity:1, y:0 }} exit={{ opacity:0 }}>
-                <p className="text-sm text-white/40 text-center mb-4">
-                  ارفع صورة ميم — هيستخرج النص ويترجمه
-                </p>
-
-                <div
-                  onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
-                  onDragLeave={() => setDrag(false)}
-                  onDrop={(e) => { e.preventDefault(); setDrag(false); loadFile(e.dataTransfer.files[0]); }}
-                  className={`relative border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all
-                    ${drag ? "border-violet-500 bg-violet-500/10" : "border-white/10 hover:border-violet-500/40 hover:bg-white/[0.015]"}`}
-                >
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                    onChange={(e) => loadFile(e.target.files?.[0] ?? null)}
-                  />
-                  {mUrl ? (
-                    <div className="space-y-2">
-                      <img src={mUrl} alt="preview" className="max-h-44 mx-auto rounded-xl object-contain" />
-                      <p className="text-[11px] text-white/30">{mFile?.name}</p>
-                    </div>
-                  ) : (
-                    <>
-                      <p className="text-3xl mb-2">🖼️</p>
-                      <p className="text-white/50 text-sm font-semibold">اسحب الصورة هنا أو اضغط للاختيار</p>
-                      <p className="text-white/22 text-xs mt-1">JPG · PNG · WEBP · GIF (max 15MB)</p>
-                    </>
-                  )}
-                </div>
-
-                {mExtracted && (
-                  <div className="mt-3 bg-black/20 border border-white/7 rounded-xl p-3">
-                    <p className="text-[11px] text-white/30 mb-1">النص المستخرج:</p>
-                    <p className="text-white/65 text-sm leading-relaxed">{mExtracted}</p>
-                  </div>
-                )}
-
-                <button
-                  onClick={processMedia}
-                  disabled={loading || !mFile}
-                  className="w-full mt-4 py-3 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:opacity-40 font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-violet-500/25 transition-all"
-                >
-                  {loading ? <Spinner /> : "🔍"}
-                  {loading ? "بيحلل الصورة..." : "استخرج وترجم"}
-                </button>
-              </motion.div>
-            )}
-
-          </AnimatePresence>
-
-          {/* Error */}
-          <AnimatePresence>
-            {error && (
-              <motion.div
-                initial={{ opacity:0, y:6 }}
-                animate={{ opacity:1, y:0 }}
-                exit={{ opacity:0 }}
-                className="mt-4 bg-red-500/8 border border-red-500/20 rounded-xl p-3 text-sm text-red-300"
-              >
-                ⚠️ {error}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </motion.div>
-
-        {/* Loading */}
-        <AnimatePresence>
-          {loading && (
-            <motion.div
-              initial={{ opacity:0 }}
-              animate={{ opacity:1 }}
-              exit={{ opacity:0 }}
-              className="bg-[#111118] border border-white/7 rounded-2xl p-5 mb-3"
-            >
-              <div className="flex items-center gap-3 mb-4">
-                <Spinner />
-                <p className="text-sm text-white/40">بيحلل الميم...</p>
+                ))}
               </div>
-              {["w-3/4","w-1/2","w-5/6"].map((w, i) => (
-                <div key={i} className={`h-3 ${w} rounded bg-white/6 mb-3 overflow-hidden relative`}>
-                  <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/8 to-transparent animate-[shimmer_1.5s_infinite]" />
-                </div>
-              ))}
-            </motion.div>
-          )}
-        </AnimatePresence>
+            </div>
 
-        {/* Results */}
-        <AnimatePresence>
-          {trans && !loading && (
-            <motion.div
-              initial={{ opacity:0, y:12 }}
-              animate={{ opacity:1, y:0 }}
-              exit={{ opacity:0 }}
-              className="space-y-3"
-            >
-              {/* Not found warning */}
-              {!trans.found && (
-                <div className="bg-amber-500/8 border border-amber-500/20 rounded-xl p-3 text-xs text-amber-200">
-                  💡 العبارة دي مش موجودة في القاموس بالظبط — اللي جاي هو أقرب تحليل ممكن
-                </div>
+            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+              {copy.featureCards.map((card, index) => (
+                <motion.div
+                  key={card.title}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.15 + index * 0.08 }}
+                  className={`rounded-3xl border border-white/10 bg-[#0B1622] p-4 ${textAlignClass}`}
+                >
+                  <p className="mb-2 text-sm font-black text-white">{card.title}</p>
+                  <p className="text-sm leading-7 text-white/60">{card.body}</p>
+                </motion.div>
+              ))}
+            </div>
+          </div>
+        </motion.section>
+
+        <section className="grid gap-6 lg:grid-cols-[1.05fr_.95fr]">
+          <motion.div
+            initial={{ opacity: 0, y: 18 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.55, delay: 0.08 }}
+            className="rounded-[28px] border border-white/10 bg-white/[0.04] p-5 backdrop-blur-xl lg:p-6"
+          >
+            <div className={`mb-5 flex flex-wrap items-center justify-between gap-3 ${textAlignClass}`}>
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.3em] text-white/35">{copy.inputStudio}</p>
+                <h2 className="mt-1 text-2xl font-black">{copy.inputTitle}</h2>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button className={tabClassName("text")} onClick={() => setTab("text")}>{copy.tabText}</button>
+                <button className={tabClassName("voice")} onClick={() => setTab("voice")}>{copy.tabVoice}</button>
+                <button className={tabClassName("media")} onClick={() => setTab("media")}>{copy.tabMedia}</button>
+              </div>
+            </div>
+
+            <AnimatePresence mode="wait">
+              {tab === "text" && (
+                <motion.div key="text" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+                  <div className={`rounded-[24px] border border-white/10 bg-[#09131D] p-4 ${textAlignClass}`}>
+                    <p className="mb-3 text-xs font-bold tracking-[0.24em] text-white/35">{copy.writeAnything}</p>
+                    <textarea
+                      dir="rtl"
+                      value={txt}
+                      onChange={(event) => setTxt(event.target.value)}
+                      onKeyDown={(event) => {
+                        if ((event.ctrlKey || event.metaKey) && event.key === "Enter") runAnalysis(txt);
+                      }}
+                      placeholder={copy.textPlaceholder}
+                      rows={6}
+                      className="w-full resize-none rounded-[22px] border border-white/10 bg-white/[0.03] p-4 text-base leading-8 text-white placeholder:text-white/20 focus:border-[#14B8A6]/60 focus:outline-none"
+                    />
+
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {copy.examples.map((example) => (
+                        <button
+                          key={example}
+                          onClick={() => setTxt(example)}
+                          className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs text-white/60 transition hover:border-[#14B8A6]/45 hover:text-white"
+                        >
+                          {example}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="mt-5 flex flex-wrap gap-3">
+                      <button
+                        onClick={() => setTxt("")}
+                        className="rounded-full border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold text-white/65 transition hover:bg-white/10"
+                      >
+                        {copy.clear}
+                      </button>
+                      <button
+                        onClick={() => runAnalysis(txt)}
+                        disabled={loading}
+                        className="rounded-full bg-[linear-gradient(135deg,#14B8A6_0%,#0F766E_100%)] px-5 py-2.5 text-sm font-black text-white shadow-[0_16px_30px_rgba(20,184,166,0.25)] transition hover:scale-[1.01] disabled:opacity-50"
+                      >
+                        {loading ? copy.loading : copy.analyze}
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
               )}
 
-              {/* Translation */}
-              <div className="bg-[#111118] border border-violet-500/20 rounded-2xl p-5">
-                <div className="flex items-center gap-2 mb-4">
-                  <span className="text-lg">🎭</span>
-                  <h2 className="font-black text-sm text-white">الترجمة</h2>
-                  <span
-                    className="mr-auto text-[11px] px-2.5 py-0.5 rounded-full border font-bold"
-                    style={{
-                      background: `${toneColor}15`,
-                      borderColor: `${toneColor}30`,
-                      color: toneColor,
-                    }}
-                  >
-                    {trans.tone}
-                  </span>
-                </div>
+              {tab === "voice" && (
+                <motion.div key="voice" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+                  <div className={`rounded-[24px] border border-white/10 bg-[#09131D] p-5 text-center ${textAlignClass}`}>
+                    <p className="text-sm leading-7 text-white/65">{copy.voiceBody}</p>
+                    {micPerm === "denied" && (
+                      <div className="mt-4 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-3 text-sm text-amber-100">
+                        {copy.micDenied}
+                      </div>
+                    )}
 
-                <div className="space-y-2.5">
-                  <div className="bg-black/25 rounded-xl p-3.5">
-                    <p className="text-[11px] text-white/30 mb-1">الأصل</p>
-                    <p className="text-white/75 text-sm leading-relaxed">{trans.original}</p>
-                  </div>
-                  <div
-                    className="rounded-xl p-3.5"
-                    style={{ background:"rgba(124,58,237,.1)", border:"1px solid rgba(124,58,237,.18)" }}
-                  >
-                    <p className="text-[11px] text-violet-300/60 mb-1">الترجمة</p>
-                    <p className="text-white font-bold text-[15px] leading-relaxed">{trans.translation}</p>
+                    <WaveViz active={vState === "rec"} />
+
+                    <p className={`mb-4 text-sm font-bold ${vState === "rec" ? "text-[#5EEAD4]" : "text-white/45"}`}>
+                      {vState === "idle" && copy.voiceIdle}
+                      {vState === "rec" && copy.voiceRec}
+                      {vState === "done" && copy.voiceDone}
+                    </p>
+
                     <button
-                      onClick={() => navigator.clipboard.writeText(trans.translation)}
-                      className="mt-2 text-[11px] text-violet-400/55 hover:text-violet-300 transition-colors"
+                      onClick={vState === "rec" ? stopVoice : startVoice}
+                      disabled={loading || micPerm === "denied"}
+                      className={`mx-auto flex h-20 w-20 items-center justify-center rounded-full text-3xl shadow-lg transition ${
+                        vState === "rec"
+                          ? "bg-[#F43F5E] text-white shadow-[0_18px_40px_rgba(244,63,94,0.35)]"
+                          : "bg-[linear-gradient(135deg,#14B8A6_0%,#0F766E_100%)] text-white shadow-[0_18px_40px_rgba(20,184,166,0.35)]"
+                      } disabled:opacity-40`}
                     >
-                      📋 نسخ
+                      {vState === "rec" ? "⏹" : "🎙️"}
+                    </button>
+
+                    <div className={`mt-5 rounded-[22px] border border-white/10 bg-white/[0.03] p-4 ${textAlignClass}`}>
+                      <p className="mb-2 text-xs font-bold tracking-[0.2em] text-white/35">{copy.transcript}</p>
+                      <textarea
+                        dir="rtl"
+                        value={vText}
+                        onChange={(event) => setVText(event.target.value)}
+                        rows={4}
+                        placeholder={copy.transcriptPlaceholder}
+                        className="w-full resize-none bg-transparent text-base leading-8 text-white placeholder:text-white/20 focus:outline-none"
+                      />
+                    </div>
+
+                    <button
+                      onClick={() => runAnalysis(vText)}
+                      disabled={loading || !vText.trim()}
+                      className="mt-5 w-full rounded-full bg-[linear-gradient(135deg,#14B8A6_0%,#0F766E_100%)] px-5 py-3 text-sm font-black text-white shadow-[0_16px_30px_rgba(20,184,166,0.25)] transition disabled:opacity-50"
+                    >
+                      {loading ? copy.loading : copy.analyzeVoice}
                     </button>
                   </div>
-                  {trans.explanation && (
-                    <div className="bg-white/[0.025] rounded-xl p-3.5">
-                      <p className="text-[11px] text-white/30 mb-1">الشرح</p>
-                      <p className="text-white/55 text-xs leading-relaxed">{trans.explanation}</p>
+                </motion.div>
+              )}
+
+              {tab === "media" && (
+                <motion.div key="media" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+                  <div className={`rounded-[24px] border border-white/10 bg-[#09131D] p-4 ${textAlignClass}`}>
+                    <p className="mb-4 text-sm leading-7 text-white/65">{copy.mediaBody}</p>
+
+                    <div
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        setDrag(true);
+                      }}
+                      onDragLeave={() => setDrag(false)}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        setDrag(false);
+                        loadFile(event.dataTransfer.files[0] ?? null);
+                      }}
+                      className={`relative rounded-[24px] border border-dashed p-6 text-center transition ${
+                        drag ? "border-[#14B8A6] bg-[#14B8A6]/10" : "border-white/15 bg-white/[0.03]"
+                      }`}
+                    >
+                      <input
+                        type="file"
+                        accept="image/*,video/*"
+                        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                        onChange={(event) => loadFile(event.target.files?.[0] ?? null)}
+                      />
+
+                      {mUrl ? (
+                        <div className="space-y-3">
+                          {mediaKind === "image" ? (
+                            <img src={mUrl} alt="preview" className="mx-auto max-h-60 rounded-2xl object-contain" />
+                          ) : (
+                            <video src={mUrl} controls className="mx-auto max-h-60 rounded-2xl object-contain" />
+                          )}
+                          <p className="text-sm text-white/65">{mFile?.name}</p>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="mb-2 text-4xl">🎞️</p>
+                          <p className="text-base font-bold text-white">{copy.dropTitle}</p>
+                          <p className="mt-2 text-sm text-white/45">JPG / PNG / WEBP / GIF / MP4 / MOV</p>
+                        </>
+                      )}
                     </div>
-                  )}
+
+                    {mExtracted && (
+                      <div className={`mt-4 rounded-[22px] border border-white/10 bg-white/[0.03] p-4 ${textAlignClass}`}>
+                        <p className="mb-2 text-xs font-bold tracking-[0.2em] text-white/35">{copy.extracted}</p>
+                        <p className="text-sm leading-8 text-white/75">{mExtracted}</p>
+                      </div>
+                    )}
+
+                    <button
+                      onClick={processMedia}
+                      disabled={loading || !mFile}
+                      className="mt-5 w-full rounded-full bg-[linear-gradient(135deg,#14B8A6_0%,#0F766E_100%)] px-5 py-3 text-sm font-black text-white shadow-[0_16px_30px_rgba(20,184,166,0.25)] transition disabled:opacity-50"
+                    >
+                      {loading ? copy.loading : copy.processMedia}
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <AnimatePresence>
+              {error && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-400/10 p-4 text-sm text-rose-100"
+                >
+                  {error}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 18 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.55, delay: 0.16 }}
+            className="rounded-[28px] border border-white/10 bg-white/[0.04] p-5 backdrop-blur-xl lg:p-6"
+          >
+            <div className={`mb-5 flex items-center justify-between gap-3 ${textAlignClass}`}>
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.3em] text-white/35">{copy.insights}</p>
+                <h2 className="mt-1 text-2xl font-black">{copy.insightsTitle}</h2>
+              </div>
+              {trans && modeMeta && (
+                <span
+                  className="rounded-full border px-3 py-1 text-xs font-black"
+                  style={{
+                    color: modeMeta.color,
+                    borderColor: `${modeMeta.color}55`,
+                    background: `${modeMeta.color}15`,
+                  }}
+                >
+                  {modeMeta.label}
+                </span>
+              )}
+            </div>
+
+            {loading ? (
+              <div className="rounded-[24px] border border-white/10 bg-[#09131D] p-5">
+                <div className="mb-5 flex items-center gap-3 text-white/70">
+                  <Spinner />
+                  <p className="text-sm">{copy.loading}</p>
+                </div>
+                <div className="space-y-3">
+                  {["w-4/5", "w-full", "w-3/5"].map((width) => (
+                    <div key={width} className={`h-3 ${width} animate-pulse rounded-full bg-white/8`} />
+                  ))}
                 </div>
               </div>
-
-              {/* Emotion */}
-              {emo && primMeta && (
-                <div className="bg-[#111118] border border-white/7 rounded-2xl p-5">
-                  <div className="flex items-center gap-2 mb-4">
-                    <span className="text-lg">🧠</span>
-                    <h2 className="font-black text-sm text-white">تحليل المشاعر</h2>
+            ) : trans ? (
+              <div className="space-y-4">
+                <div className={`rounded-[26px] border border-white/10 bg-[linear-gradient(180deg,rgba(11,22,34,.95),rgba(7,17,26,.95))] p-5 ${textAlignClass}`}>
+                  <div className="mb-4 flex flex-wrap items-center gap-2">
+                    <span
+                      className="rounded-full border px-3 py-1 text-xs font-black"
+                      style={{
+                        color: toneColor,
+                        borderColor: `${toneColor}44`,
+                        background: `${toneColor}18`,
+                      }}
+                    >
+                      {copy.toneLabels[trans.tone as keyof typeof copy.toneLabels] ?? trans.tone}
+                    </span>
+                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-bold text-white/60">
+                      {copy.confidence} {Math.round(trans.confidence * 100)}%
+                    </span>
+                    {!trans.found && (
+                      <span className="rounded-full border border-amber-300/20 bg-amber-300/10 px-3 py-1 text-xs font-bold text-amber-100">
+                        {copy.flexible}
+                      </span>
+                    )}
                   </div>
 
-                  {/* Hero */}
-                  <div
-                    className="rounded-xl p-5 text-center mb-4 border"
-                    style={{
-                      background: `${primMeta.color}10`,
-                      borderColor: `${primMeta.color}25`,
-                    }}
-                  >
-                    <p className="text-5xl mb-2">{primMeta.emoji}</p>
-                    <p className="text-2xl font-black mb-1" style={{ color: primMeta.color }}>
-                      {emo.primary}
-                    </p>
-                    {emo.secondary && (
-                      <p className="text-white/38 text-xs">+ {emo.secondary}</p>
-                    )}
-                    <div className="flex items-center justify-center gap-2 mt-3">
-                      <div className="h-1.5 w-24 rounded-full bg-white/8 overflow-hidden">
-                        <motion.div
-                          initial={{ width: 0 }}
-                          animate={{ width: `${(emo.intensity / 5) * 100}%` }}
-                          transition={{ duration: 0.9 }}
-                          className="h-full rounded-full"
-                          style={{ background: primMeta.color }}
+                  <div className="space-y-3">
+                    <div className="rounded-[20px] border border-white/8 bg-white/[0.03] p-4">
+                      <p className="mb-2 text-xs font-bold tracking-[0.2em] text-white/35">{copy.original}</p>
+                      <p className="text-sm leading-8 text-white/75">{trans.original}</p>
+                    </div>
+
+                    <div className="rounded-[20px] border p-4" style={{ borderColor: `${toneColor}33`, background: `${toneColor}12` }}>
+                      <p className="mb-2 text-xs font-bold tracking-[0.2em]" style={{ color: toneColor }}>
+                        {copy.interpretation}
+                      </p>
+                      <p className="text-base font-bold leading-8 text-white">{trans.translation}</p>
+                    </div>
+
+                    <div className="rounded-[20px] border border-white/8 bg-white/[0.03] p-4">
+                      <p className="mb-2 text-xs font-bold tracking-[0.2em] text-white/35">{copy.why}</p>
+                      <p className="text-sm leading-8 text-white/70">{trans.explanation}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {trans.matchedPhrases.length > 0 && (
+                  <div className={`rounded-[24px] border border-white/10 bg-[#09131D] p-4 ${textAlignClass}`}>
+                    <p className="mb-3 text-xs font-bold tracking-[0.2em] text-white/35">{copy.matched}</p>
+                    <div className="flex flex-wrap gap-2">
+                      {trans.matchedPhrases.map((phrase) => (
+                        <span key={phrase} className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-white/70">
+                          {phrase}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {emo && primaryEmotion && (
+                  <div className={`rounded-[24px] border border-white/10 bg-[#09131D] p-5 ${textAlignClass}`}>
+                    <div
+                      className="mb-5 rounded-[22px] border p-5 text-center"
+                      style={{
+                        borderColor: `${primaryEmotion.color}33`,
+                        background: `${primaryEmotion.color}12`,
+                      }}
+                    >
+                      <p className="mb-2 text-5xl">{primaryEmotion.emoji}</p>
+                      <p className="text-2xl font-black" style={{ color: primaryEmotion.color }}>
+                        {copy.emotionLabels[emo.primary as keyof typeof copy.emotionLabels] ?? emo.primary}
+                      </p>
+                      {emo.secondary && (
+                        <p className="mt-1 text-sm text-white/45">
+                          + {copy.emotionLabels[emo.secondary as keyof typeof copy.emotionLabels] ?? emo.secondary}
+                        </p>
+                      )}
+                      <p className="mt-3 text-xs font-bold text-white/45">
+                        {copy.intensity}: {emo.intensity}/5
+                      </p>
+                    </div>
+
+                    {Object.entries(emo.percentages)
+                      .sort(([, a], [, b]) => b - a)
+                      .filter(([, value]) => value > 0)
+                      .map(([label, value]) => (
+                        <EmotionBar
+                          key={label}
+                          label={copy.emotionLabels[label as keyof typeof copy.emotionLabels] ?? label}
+                          value={value}
+                          color={EMOTION_META[label]?.color ?? "#94A3B8"}
+                          emoji={EMOTION_META[label]?.emoji ?? "🎭"}
                         />
-                      </div>
-                      <span className="text-[11px] text-white/30 font-semibold">
-                        شدة {emo.intensity}/5
+                      ))}
+
+                    <div className="mt-4 flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                      <span className="text-sm text-white/55">{copy.sentiment}</span>
+                      <span className="text-sm font-black text-white">
+                        {emo.sentiment === "positive" ? copy.positive : emo.sentiment === "negative" ? copy.negative : copy.neutral}
                       </span>
                     </div>
                   </div>
-
-                  {/* Bars */}
-                  <p className="text-[11px] text-white/30 font-bold tracking-wider mb-3">توزيع المشاعر</p>
-                  {Object.entries(emo.percentages)
-                    .sort(([, a], [, b]) => b - a)
-                    .filter(([, v]) => v > 0)
-                    .map(([name, pct]) => (
-                      <EmotionBar
-                        key={name}
-                        label={name}
-                        value={pct}
-                        color={EMOTION_META[name]?.color ?? "#888"}
-                        emoji={EMOTION_META[name]?.emoji ?? "🎭"}
-                      />
-                    ))}
-
-                  {/* Sentiment */}
-                  <div className="flex items-center gap-2 mt-4 pt-4 border-t border-white/7">
-                    <span className="text-xs text-white/30">التوجه العام:</span>
-                    <span
-                      className={`text-xs font-black px-2.5 py-1 rounded-full border ${
-                        emo.sentiment === "positive"
-                          ? "bg-green-500/10 border-green-500/20 text-green-400"
-                          : emo.sentiment === "negative"
-                          ? "bg-red-500/10 border-red-500/20 text-red-400"
-                          : "bg-white/4 border-white/8 text-white/40"
-                      }`}
-                    >
-                      {emo.sentiment === "positive"
-                        ? "😊 إيجابي"
-                        : emo.sentiment === "negative"
-                        ? "😞 سلبي"
-                        : "😐 محايد"}
-                    </span>
-                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex min-h-[420px] items-center justify-center rounded-[24px] border border-white/10 bg-[#09131D] p-8 text-center">
+                <div>
+                  <p className="mb-3 text-5xl">🧠</p>
+                  <h3 className="text-xl font-black">{copy.ready}</h3>
+                  <p className="mt-3 max-w-md text-sm leading-7 text-white/55">{copy.readyBody}</p>
                 </div>
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Empty */}
-        {!trans && !loading && !error && (
-          <p className="text-center py-10 text-white/12 text-sm">
-            اختار طريقة الإدخال وابدأ 🎭
-          </p>
-        )}
-
-        <footer className="mt-12 text-center text-white/12 text-[11px]">
-          مترجم الميمز المصرية · مجاني 100% · بدون API
-        </footer>
+              </div>
+            )}
+          </motion.div>
+        </section>
       </div>
     </main>
   );
