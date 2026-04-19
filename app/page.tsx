@@ -40,8 +40,6 @@ const UI_COPY = {
     badge: "Studio for Egyptian Meme Intelligence",
     titleLead: "Egyptian Meme",
     titleAccent: "Translator",
-    hero:
-      "Turn the project into a smarter tool that understands full sentences, listens to voice, extracts text from images or video, and presents translation, tone, and emotion in a polished interface.",
     inputStudio: "Input Studio",
     inputTitle: "Enter your meme any way you like",
     tabText: "Text",
@@ -139,8 +137,6 @@ const UI_COPY = {
     badge: "منصة ذكية لفهم الميمز المصرية",
     titleLead: "مترجم",
     titleAccent: "الميمز المصرية",
-    hero:
-      "خلّينا نحوّل المشروع إلى أداة أذكى تفهم الجمل، تلتقط الكلام من الصوت، تستخرج النص من الصور أو الفيديو، وتعرض الترجمة والنبرة والمشاعر في واجهة احترافية.",
     inputStudio: "منطقة الإدخال",
     inputTitle: "أدخل الميم بأي طريقة تحبها",
     tabText: "نص",
@@ -575,7 +571,6 @@ export default function Home() {
                 </span>
               </h1>
 
-              <p className="mt-5 max-w-2xl text-base leading-8 text-white/70 sm:text-lg">{copy.hero}</p>
             </div>
           </div>
         </motion.section>
