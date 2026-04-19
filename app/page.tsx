@@ -42,21 +42,6 @@ const UI_COPY = {
     titleAccent: "Translator",
     hero:
       "Turn the project into a smarter tool that understands full sentences, listens to voice, extracts text from images or video, and presents translation, tone, and emotion in a polished interface.",
-    chips: ["100% local", "New sentences", "Image + video OCR", "Emotion analysis"],
-    featureCards: [
-      {
-        title: "Sentence Understanding",
-        body: "Not just memorized phrases. The app now tries to interpret unseen Egyptian Arabic sentences too.",
-      },
-      {
-        title: "Voice, Image, and Video",
-        body: "Type, speak, or upload media and let the local analysis pipeline do the heavy lifting.",
-      },
-      {
-        title: "Meaning + Emotion",
-        body: "Each result combines translation, tone, confidence, and emotional breakdown in one view.",
-      },
-    ],
     inputStudio: "Input Studio",
     inputTitle: "Enter your meme any way you like",
     tabText: "Text",
@@ -156,21 +141,6 @@ const UI_COPY = {
     titleAccent: "الميمز المصرية",
     hero:
       "خلّينا نحوّل المشروع إلى أداة أذكى تفهم الجمل، تلتقط الكلام من الصوت، تستخرج النص من الصور أو الفيديو، وتعرض الترجمة والنبرة والمشاعر في واجهة احترافية.",
-    chips: ["محلي 100%", "جمل جديدة", "OCR للصورة والفيديو", "تحليل مشاعر"],
-    featureCards: [
-      {
-        title: "فهم الجمل",
-        body: "ليس مجرد عبارات محفوظة، بل محاولة لفهم الجمل المصرية الجديدة أيضًا.",
-      },
-      {
-        title: "صوت وصورة وفيديو",
-        body: "اكتب أو اتكلم أو ارفع وسائط، وسيكمل التحليل المحلي باقي المهمة.",
-      },
-      {
-        title: "معنى + مشاعر",
-        body: "كل نتيجة تجمع بين الترجمة والنبرة والثقة وتحليل المشاعر في مكان واحد.",
-      },
-    ],
     inputStudio: "منطقة الإدخال",
     inputTitle: "أدخل الميم بأي طريقة تحبها",
     tabText: "نص",
@@ -596,7 +566,7 @@ export default function Home() {
             </button>
           </div>
 
-          <div className="grid gap-8 lg:grid-cols-[1.3fr_.9fr] lg:items-center">
+          <div className="grid gap-8 lg:grid-cols-1 lg:items-center">
             <div className={textAlignClass}>
               <h1 className="max-w-3xl text-[clamp(2.4rem,7vw,5rem)] font-black leading-[0.95] tracking-tight">
                 {copy.titleLead}
@@ -606,29 +576,6 @@ export default function Home() {
               </h1>
 
               <p className="mt-5 max-w-2xl text-base leading-8 text-white/70 sm:text-lg">{copy.hero}</p>
-
-              <div className="mt-6 flex flex-wrap gap-3">
-                {copy.chips.map((chip) => (
-                  <div key={chip} className="rounded-full border border-white/10 bg-white/6 px-4 py-2 text-sm text-white/80">
-                    {chip}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
-              {copy.featureCards.map((card, index) => (
-                <motion.div
-                  key={card.title}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.15 + index * 0.08 }}
-                  className={`rounded-3xl border border-white/10 bg-[#0B1622] p-4 ${textAlignClass}`}
-                >
-                  <p className="mb-2 text-sm font-black text-white">{card.title}</p>
-                  <p className="text-sm leading-7 text-white/60">{card.body}</p>
-                </motion.div>
-              ))}
             </div>
           </div>
         </motion.section>
