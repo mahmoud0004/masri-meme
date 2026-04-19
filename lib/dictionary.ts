@@ -13,7 +13,6 @@ export type PhraseData = {
 };
 
 export const DICTIONARY: Record<string, PhraseData> = {
-
   // ── Sarcasm ───────────────────────────────────────────────────────
   "متعملش فيها ناصح": {
     translation: "Stop acting like you know better",
@@ -387,8 +386,21 @@ export const DICTIONARY: Record<string, PhraseData> = {
 };
 
 // ── Smart lookup ──────────────────────────────────────────────────────────────
+function normalizeArabic(input: string) {
+  return input
+    .trim()
+    .toLowerCase()
+    .replace(/[أإآ]/g, "ا")
+    .replace(/ى/g, "ي")
+    .replace(/ة/g, "ه")
+    .replace(/[ً-ْ]/g, "")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ");
+}
+
 export function lookupPhrase(input: string): PhraseData | null {
   const clean = input.trim();
+  const normalizedInput = normalizeArabic(clean);
 
   // 1. Exact match
   if (DICTIONARY[clean]) return DICTIONARY[clean];
@@ -401,16 +413,24 @@ export function lookupPhrase(input: string): PhraseData | null {
 
   // 3. Input contains dictionary phrase or vice versa
   for (const [key, val] of Object.entries(DICTIONARY)) {
-    if (clean.includes(key) || key.includes(clean)) return val;
+    const normalizedKey = normalizeArabic(key);
+    if (
+      clean.includes(key) ||
+      key.includes(clean) ||
+      normalizedInput.includes(normalizedKey) ||
+      normalizedKey.includes(normalizedInput)
+    ) {
+      return val;
+    }
   }
 
   // 4. Word overlap scoring
-  const inputWords = clean.split(/\s+/).filter(w => w.length > 1);
+  const inputWords = normalizedInput.split(/\s+/).filter(w => w.length > 1);
   let bestScore = 0;
   let bestMatch: PhraseData | null = null;
 
   for (const [key, val] of Object.entries(DICTIONARY)) {
-    const keyWords = key.split(/\s+/);
+    const keyWords = normalizeArabic(key).split(/\s+/);
     const overlap = inputWords.filter(w =>
       keyWords.some(kw => kw.includes(w) || w.includes(kw))
     ).length;

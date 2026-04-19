@@ -1,15 +1,172 @@
 import * as Tesseract from "tesseract.js";
 
-async function recognizeSource(source: string) {
-  const { data } = await Tesseract.recognize(source, "ara", {
-    logger: (message: { progress?: number; status?: string }) => {
-      if (message.progress !== undefined) {
-        console.log("OCR:", message.status, message.progress);
-      }
-    },
-  });
+const UI_NOISE_PATTERNS = [
+  /for you/i,
+  /following/i,
+  /explore/i,
+  /friends/i,
+  /profile/i,
+  /inbox/i,
+  /home/i,
+  /live/i,
+  /search/i,
+  /png|jpg|jpeg|mp4|mov/i,
+  /^\d{1,2}:\d{2}/,
+  /^\d+\s*%$/,
+];
 
-  return data.text.trim();
+function scoreTextLine(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed) return -100;
+
+  const arabicCount = (trimmed.match(/[\u0600-\u06FF]/g) ?? []).length;
+  const latinCount = (trimmed.match(/[A-Za-z]/g) ?? []).length;
+  const digitCount = (trimmed.match(/\d/g) ?? []).length;
+  const symbolCount = (trimmed.match(/[^\p{L}\p{N}\s]/gu) ?? []).length;
+  const noisePenalty = UI_NOISE_PATTERNS.some((pattern) => pattern.test(trimmed)) ? 25 : 0;
+  const shortPenalty = trimmed.length < 4 ? 12 : 0;
+
+  return arabicCount * 4 + latinCount * 1.5 - digitCount * 2 - symbolCount * 1.5 - noisePenalty - shortPenalty;
+}
+
+function cleanRecognizedText(raw: string) {
+  const lines = raw
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+
+  const kept = lines.filter((line) => scoreTextLine(line) >= 6);
+  const unique = Array.from(new Set((kept.length ? kept : lines).map((line) => line.trim())));
+
+  return unique.join("\n").trim();
+}
+
+function scoreFullText(text: string) {
+  return text
+    .split(/\r?\n/)
+    .reduce((total, line) => total + Math.max(scoreTextLine(line), 0), 0);
+}
+
+async function preprocessImageSource(source: string) {
+  return new Promise<string>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = 2;
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, img.width * scale);
+      canvas.height = Math.max(1, img.height * scale);
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        reject(new Error("Failed to create OCR canvas"));
+        return;
+      }
+
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+
+      for (let index = 0; index < data.length; index += 4) {
+        const gray = data[index] * 0.299 + data[index + 1] * 0.587 + data[index + 2] * 0.114;
+        const boosted = gray > 165 ? 255 : gray < 95 ? 0 : gray;
+        data[index] = boosted;
+        data[index + 1] = boosted;
+        data[index + 2] = boosted;
+      }
+
+      ctx.putImageData(imageData, 0, 0);
+      resolve(canvas.toDataURL("image/png"));
+    };
+
+    img.onerror = () => reject(new Error("Failed to load image for OCR"));
+    img.src = source;
+  });
+}
+
+async function cropImageSource(
+  source: string,
+  crop: { x: number; y: number; width: number; height: number },
+) {
+  return new Promise<string>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.floor(img.width * crop.width));
+      canvas.height = Math.max(1, Math.floor(img.height * crop.height));
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        reject(new Error("Failed to create crop canvas"));
+        return;
+      }
+
+      ctx.drawImage(
+        img,
+        Math.floor(img.width * crop.x),
+        Math.floor(img.height * crop.y),
+        Math.floor(img.width * crop.width),
+        Math.floor(img.height * crop.height),
+        0,
+        0,
+        canvas.width,
+        canvas.height,
+      );
+
+      resolve(canvas.toDataURL("image/png"));
+    };
+
+    img.onerror = () => reject(new Error("Failed to crop image"));
+    img.src = source;
+  });
+}
+
+async function buildRecognitionVariants(source: string) {
+  const variants = [source];
+
+  const crops = [
+    { x: 0.12, y: 0.1, width: 0.76, height: 0.78 },
+    { x: 0.16, y: 0.12, width: 0.68, height: 0.32 },
+    { x: 0.1, y: 0.58, width: 0.8, height: 0.22 },
+  ];
+
+  for (const crop of crops) {
+    try {
+      variants.push(await cropImageSource(source, crop));
+    } catch {}
+  }
+
+  const preprocessed: string[] = [];
+  for (const variant of variants) {
+    try {
+      preprocessed.push(await preprocessImageSource(variant));
+    } catch {
+      preprocessed.push(variant);
+    }
+  }
+
+  return Array.from(new Set([...variants, ...preprocessed]));
+}
+
+async function recognizeSource(source: string) {
+  const attempts = await buildRecognitionVariants(source);
+  const results: string[] = [];
+
+  for (const item of attempts) {
+    const { data } = await Tesseract.recognize(item, "ara+eng", {
+      logger: (message: { progress?: number; status?: string }) => {
+        if (message.progress !== undefined) {
+          console.log("OCR:", message.status, message.progress);
+        }
+      },
+    });
+
+    const text = cleanRecognizedText(data.text.replace(/[|]/g, " "));
+
+    if (text) results.push(text);
+  }
+
+  return results.sort((a, b) => scoreFullText(b) - scoreFullText(a))[0] ?? "";
 }
 
 export async function extractTextFromImage(file: File): Promise<string> {
@@ -66,16 +223,17 @@ export async function extractTextFromVideo(file: File): Promise<string> {
       video.onerror = () => reject(new Error("Failed to load video"));
     });
 
-    const checkpoints = [0.2, 0.5, 0.8].map((ratio) => (video.duration || 1) * ratio);
+    const checkpoints = [0.1, 0.25, 0.4, 0.55, 0.7, 0.85].map((ratio) => (video.duration || 1) * ratio);
     const results: string[] = [];
 
     for (const checkpoint of checkpoints) {
       const frame = await captureFrame(video, checkpoint);
       const text = await recognizeSource(frame);
-      if (text) results.push(text);
+      if (text && text.length > 1) results.push(text);
     }
 
-    return results.sort((a, b) => b.length - a.length)[0] ?? "";
+    const unique = Array.from(new Set(results.map((item) => item.trim()))).sort((a, b) => b.length - a.length);
+    return unique[0] ?? "";
   } finally {
     URL.revokeObjectURL(url);
   }

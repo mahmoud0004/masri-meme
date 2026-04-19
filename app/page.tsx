@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { detectEmotions } from "@/lib/emotions";
 import { extractTextFromFile } from "@/lib/ocr";
-import { getEmotionFromDictionary, translateMeme } from "@/lib/translations";
+import { buildLiteralGloss, getEmotionFromDictionary, translateMeme } from "@/lib/translations";
 import type { EmotionResult } from "@/lib/emotions";
 import type { TranslationMode, TranslationResult } from "@/lib/translations";
 
@@ -449,6 +449,87 @@ function InputShell({
   );
 }
 
+function buildCulturalContext(result: TranslationResult) {
+  const original = result.original.trim();
+
+  if (result.translation === "Don't overthink it / Don't stress yourself about it") {
+    return `In Egyptian Arabic, "${original}" is a common everyday phrase said to calm someone down or tell them not to worry too much. It can sound supportive like "relax, it's not worth the stress," or slightly dismissive depending on tone, more like "leave it, don't bother." It is usually used in casual situations with friends, family, or coworkers.`;
+  }
+
+  if (result.found) {
+    return `In Egyptian Arabic, "${original}" is used as a natural social expression, not just a direct sentence. The important part is the attitude, relationship, and tone behind it, which is why the app gives the intended meaning instead of only translating the words.`;
+  }
+
+  return `This phrase is being interpreted as Egyptian everyday speech rather than formal Arabic. The wording suggests a social, emotional, or culture-specific meaning, so the app focuses on what the speaker is trying to convey in context.`;
+}
+
+function buildEnglishEquivalent(result: TranslationResult) {
+  if (result.translation === "Don't overthink it / Don't stress yourself about it") {
+    return {
+      phrase: "Don't sweat it",
+      note: "Both are used to tell someone to relax and stop worrying or overthinking something that is not worth the stress.",
+    };
+  }
+
+  if (result.tone === "Ø³Ø®Ø±ÙŠØ©") {
+    return {
+      phrase: "Yeah, right",
+      note: "This carries a sarcastic social meaning more than a literal one.",
+    };
+  }
+
+  if (result.tone === "Ø­Ø¨") {
+    return {
+      phrase: "You mean a lot to me",
+      note: "This captures the emotional warmth better than a direct translation.",
+    };
+  }
+
+  if (result.tone === "ØºØ¶Ø¨") {
+    return {
+      phrase: "I've had enough",
+      note: "This reflects the frustration or fed-up tone behind the phrase.",
+    };
+  }
+
+  return {
+    phrase: result.translation,
+    note: "This is the closest natural English equivalent based on meaning and tone.",
+  };
+}
+
+function buildToneBreakdown(result: TranslationResult, emotion: EmotionResult) {
+  if (result.translation === "Don't overthink it / Don't stress yourself about it") {
+    return [
+      { label: "Reassurance", value: 45, color: "#ff9a3c" },
+      { label: "Calm", value: 30, color: "#ffb35f" },
+      { label: "Casual support", value: 25, color: "#ffc980" },
+    ];
+  }
+
+  function mapEmotionLabel(label: string) {
+    if (label === "فرحان") return "Joy";
+    if (label === "غاضب") return "Anger";
+    if (label === "زعلان") return "Sadness";
+    if (label === "ساخر") return "Sarcasm";
+    if (label === "متحمس") return "Excitement";
+    if (label === "متضايق") return "Annoyance";
+    if (label === "خايف") return "Worry";
+    if (label === "مبسوط") return "Comfort";
+    return label;
+  }
+
+  return Object.entries(emotion.percentages)
+    .sort(([, a], [, b]) => b - a)
+    .filter(([, value]) => value > 0)
+    .slice(0, 3)
+    .map(([label, value]) => ({
+      label: mapEmotionLabel(label),
+      value,
+      color: EMOTION_META[label]?.color ?? "#ff9a3c",
+    }));
+}
+
 export default function Home() {
   const [mounted, setMounted] = useState(false);
   const [theme, setTheme] = useState<ThemeMode>("light");
@@ -472,6 +553,7 @@ export default function Home() {
 
   const [translation, setTranslation] = useState<TranslationResult | null>(null);
   const [emotion, setEmotion] = useState<EmotionResult | null>(null);
+  const [analyzedSource, setAnalyzedSource] = useState<InputMode>("text");
 
   const [customEntries, setCustomEntries] = useState<CustomEntry[]>([]);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
@@ -490,6 +572,25 @@ export default function Home() {
 
   const primaryEmotion = emotion ? EMOTION_META[emotion.primary] : null;
   const toneColor = translation ? TONE_COLORS[translation.tone] ?? "#94a3b8" : "#94a3b8";
+  const literalGloss = translation ? buildLiteralGloss(translation.original) : "";
+  const culturalContext = translation ? buildCulturalContext(translation) : "";
+  const englishEquivalent = translation ? buildEnglishEquivalent(translation) : null;
+  const toneBreakdown = translation && emotion ? buildToneBreakdown(translation, emotion) : [];
+  const transcriptMeta =
+    analyzedSource === "voice"
+      ? {
+          label: "Voice Transcription",
+          note: "What the app heard and transcribed from spoken Egyptian Arabic.",
+        }
+      : analyzedSource === "media"
+        ? {
+            label: "Media Transcription",
+            note: "What the app extracted from the uploaded image or video before interpretation.",
+          }
+        : {
+            label: "Text Transcription",
+            note: "The exact phrase the app analyzed from your typed Egyptian Arabic input.",
+          };
 
   useEffect(() => {
     setMounted(true);
@@ -584,21 +685,6 @@ export default function Home() {
           mode: "dictionary",
           matchedPhrases: [custom.slang],
         };
-      } else if (literalMode) {
-        const direct = translateMeme(trimmed);
-        nextTranslation = direct.found
-          ? direct
-          : {
-              original: trimmed,
-              translation: "No exact literal match found.",
-              explanation:
-                "Literal translation mode only returns exact dictionary-style matches. Turn it off to get inferred meaning.",
-              tone: "عادي",
-              found: false,
-              confidence: 0.42,
-              mode: "inference",
-              matchedPhrases: [],
-            };
       } else {
         nextTranslation = translateMeme(trimmed);
       }
@@ -607,6 +693,7 @@ export default function Home() {
 
       setTranslation(nextTranslation);
       setEmotion(nextEmotion);
+      setAnalyzedSource(source);
       rememberHistory(nextTranslation, source);
     } catch {
       setError("Something went wrong during analysis.");
@@ -699,6 +786,7 @@ export default function Home() {
       const extracted = await extractTextFromFile(mediaFile);
       if (!extracted.trim()) {
         setError("I could not read clear text from the file. Try a clearer file.");
+        setLoading(false);
         return;
       }
 
@@ -1082,36 +1170,52 @@ export default function Home() {
 
                       <div className="mt-5 space-y-4">
                         <div className="rounded-2xl border border-[#ecdccf] bg-white p-4">
-                          <div className="text-xs font-bold uppercase tracking-[0.16em] text-[#b28b68]">Original</div>
+                          <div className="text-xs font-bold uppercase tracking-[0.16em] text-[#b28b68]">{transcriptMeta.label}</div>
                           <p className="mt-2 text-lg leading-8 text-[#5a4029]">{translation.original}</p>
+                          <p className="mt-3 text-sm leading-7 text-[#8d6b4c]">{transcriptMeta.note}</p>
                         </div>
 
                         <div className="rounded-2xl border p-4" style={{ borderColor: `${toneColor}30`, backgroundColor: `${toneColor}10` }}>
                           <div className="text-xs font-bold uppercase tracking-[0.16em]" style={{ color: toneColor }}>
-                            Interpretation
+                            Meaning
                           </div>
-                          <p className="mt-2 text-xl font-black leading-8 text-[#21160f]">{translation.translation}</p>
-                        </div>
-
-                        <div className="rounded-2xl border border-[#ecdccf] bg-white p-4">
-                          <div className="text-xs font-bold uppercase tracking-[0.16em] text-[#b28b68]">Why this result</div>
-                          <p className="mt-2 text-base leading-8 text-[#6f5540]">{translation.explanation}</p>
+                          <p className="mt-2 text-[2rem] font-black leading-tight text-[#21160f]">{translation.translation}</p>
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            <span className="rounded-xl border border-[#9a4f1d] bg-[#3f2214] px-3 py-1.5 text-sm font-semibold text-[#ffd7b0]">
+                              Informal
+                            </span>
+                            <span className="rounded-xl border border-[#1f774d] bg-[#133726] px-3 py-1.5 text-sm font-semibold text-[#b8f0d1]">
+                              {translation.tone === "ØºØ¶Ø¨" ? "Can Be Sharp" : "Not Offensive"}
+                            </span>
+                          </div>
                         </div>
                       </div>
                     </div>
 
-                    {translation.matchedPhrases.length > 0 && (
+                    {literalMode && (
                       <div className="rounded-2xl border border-[#eadacc] bg-white p-5">
-                        <div className="text-sm font-bold uppercase tracking-[0.16em] text-[#b28b68]">Matched Expressions</div>
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          {translation.matchedPhrases.map((phrase) => (
-                            <span key={phrase} className="rounded-full border border-[#ecdccf] bg-[#fff8f1] px-3 py-1.5 text-sm text-[#7f6650]">
-                              {phrase}
-                            </span>
-                          ))}
-                        </div>
+                        <div className="text-sm font-bold uppercase tracking-[0.16em] text-[#b28b68]">Literal Translation</div>
+                        <p className="mt-4 text-2xl italic leading-9 text-[#74604d]">"{literalGloss}"</p>
                       </div>
                     )}
+
+                    <div className="rounded-2xl border border-[#eadacc] bg-white p-5">
+                      <div className="text-sm font-bold uppercase tracking-[0.16em] text-[#b28b68]">Cultural Context</div>
+                      <p className="mt-4 text-lg leading-9 text-[#5e4733]">{culturalContext}</p>
+                    </div>
+
+                    {englishEquivalent && (
+                      <div className="rounded-2xl border border-[#7a2e2e]/30 bg-[#3a1f1a] p-5">
+                        <div className="text-sm font-bold uppercase tracking-[0.16em] text-[#ff5a5a]">English Equivalent</div>
+                        <p className="mt-4 text-4xl font-black leading-tight text-white">{englishEquivalent.phrase}</p>
+                        <p className="mt-3 text-lg leading-8 text-[#f5d2c8]">{englishEquivalent.note}</p>
+                      </div>
+                    )}
+
+                    <div className="rounded-2xl border border-[#eadacc] bg-white p-5">
+                      <div className="text-sm font-bold uppercase tracking-[0.16em] text-[#b28b68]">Why this result</div>
+                      <p className="mt-4 text-base leading-8 text-[#6f5540]">{translation.explanation}</p>
+                    </div>
                   </div>
                 ) : (
                   <div className="flex min-h-[320px] items-center justify-center rounded-3xl border border-[#eadacc] bg-white text-center">
@@ -1138,7 +1242,7 @@ export default function Home() {
                       }}
                     >
                       <div className="text-sm font-bold uppercase tracking-[0.16em]" style={{ color: primaryEmotion.color }}>
-                        Primary emotion
+                        Emotional Tone
                       </div>
                       <div className="mt-4 text-3xl font-black text-[#20160f]">
                         {primaryEmotion.emoji} {emotion.primary}
@@ -1148,19 +1252,15 @@ export default function Home() {
 
                     <div className="rounded-2xl border border-[#eadacc] bg-white p-5">
                       <div className="space-y-4">
-                        {Object.entries(emotion.percentages)
-                          .sort(([, a], [, b]) => b - a)
-                          .filter(([, value]) => value > 0)
-                          .map(([label, value]) => {
-                            const meta = EMOTION_META[label] ?? { emoji: label, color: "#94a3b8" };
+                        {toneBreakdown.map((item) => {
                             return (
-                              <div key={label}>
+                              <div key={item.label}>
                                 <div className="mb-2 flex items-center justify-between text-sm">
-                                  <span className="font-semibold text-[#352519]">{meta.emoji} {label}</span>
-                                  <span className="font-bold text-[#8d6b4c]">{value}%</span>
+                                  <span className="font-semibold text-[#352519]">{item.label}</span>
+                                  <span className="font-bold text-[#8d6b4c]">{item.value}%</span>
                                 </div>
                                 <div className="h-3 rounded-full bg-[#f6ede5]">
-                                  <div className="h-3 rounded-full" style={{ width: `${value}%`, backgroundColor: meta.color }} />
+                                  <div className="h-3 rounded-full" style={{ width: `${item.value}%`, backgroundColor: item.color }} />
                                 </div>
                               </div>
                             );
@@ -1361,3 +1461,4 @@ export default function Home() {
     </main>
   );
 }
+
