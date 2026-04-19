@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { detectEmotions } from "@/lib/emotions";
-import { extractTextFromFile } from "@/lib/ocr";
+import { extractTranscriptFromMedia } from "@/lib/media-transcription";
 import { buildLiteralGloss, getEmotionFromDictionary, translateMeme } from "@/lib/translations";
 import type { EmotionResult } from "@/lib/emotions";
 import type { TranslationMode, TranslationResult } from "@/lib/translations";
@@ -30,6 +30,11 @@ type HistoryEntry = {
   source: InputMode;
   mode: TranslationMode;
   createdAt: string;
+};
+
+type NoticeState = {
+  message: string;
+  tone: "success" | "error" | "info";
 };
 
 type SpeechRecognitionResultLike = {
@@ -71,19 +76,17 @@ const STORAGE_KEYS = {
 } as const;
 
 const FORMALITY_OPTIONS = [
-  "1 - Very Casual",
+  "1 - Formal",
   "2 - Neutral",
-  "3 - Common Street Use",
-  "4 - Formal-ish",
-  "5 - Very Formal",
+  "3 - Informal",
+  "4 - Very Informal",
 ];
 
 const OFFENSIVENESS_OPTIONS = [
-  "1 - Clean",
+  "1 - Offensive",
   "2 - Not Offensive",
-  "3 - Slightly Harsh",
-  "4 - Offensive",
-  "5 - Very Offensive",
+  "3 - High Offensive",
+  "4 - Mildly Offensive",
 ];
 
 const EXAMPLES = [
@@ -498,6 +501,59 @@ function buildEnglishEquivalent(result: TranslationResult) {
   };
 }
 
+function buildSimilarIdiom(result: TranslationResult) {
+  if (result.translation === "Don't overthink it / Don't stress yourself about it") {
+    return {
+      phrase: "Don't sweat it",
+      note: "A natural English idiom used to calm someone down and tell them not to stress over something small.",
+    };
+  }
+
+  if (result.tone === "Ã˜Â³Ã˜Â®Ã˜Â±Ã™Å Ã˜Â©") {
+    return {
+      phrase: "Yeah, right",
+      note: "A sarcastic English response that matches the dismissive or mocking tone.",
+    };
+  }
+
+  if (result.tone === "Ã˜ÂºÃ˜Â¶Ã˜Â¨") {
+    return {
+      phrase: "I've had enough",
+      note: "This matches a fed-up tone more closely than a literal translation.",
+    };
+  }
+
+  if (result.tone === "Ã˜Â­Ã˜Â¨") {
+    return {
+      phrase: "You mean the world to me",
+      note: "This keeps the warmth and closeness of the original phrase.",
+    };
+  }
+
+  return {
+    phrase: "Closest natural equivalent",
+    note: "This phrase does not map neatly to one English idiom, so the app is prioritizing the closest natural meaning.",
+  };
+}
+
+function buildFormalityLevel(result: TranslationResult, customEntry?: CustomEntry | null) {
+  const toneName = TONE_LABELS[result.tone] ?? result.tone;
+  if (customEntry) return customEntry.formality;
+  if (result.translation === "Don't overthink it / Don't stress yourself about it") return "3 - Informal";
+  if (toneName === "Love") return "2 - Neutral";
+  if (toneName === "Anger") return "4 - Very Informal";
+  if (toneName === "Sarcasm") return "3 - Informal";
+  return result.found ? "2 - Neutral" : "3 - Informal";
+}
+
+function buildOffensivenessLevel(result: TranslationResult, customEntry?: CustomEntry | null) {
+  const toneName = TONE_LABELS[result.tone] ?? result.tone;
+  if (customEntry) return customEntry.offensiveness;
+  if (toneName === "Anger") return "4 - Mildly Offensive";
+  if (toneName === "Sarcasm") return "2 - Not Offensive";
+  return "2 - Not Offensive";
+}
+
 function buildToneBreakdown(result: TranslationResult, emotion: EmotionResult) {
   if (result.translation === "Don't overthink it / Don't stress yourself about it") {
     return [
@@ -539,6 +595,7 @@ export default function Home() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<NoticeState | null>(null);
 
   const [textInput, setTextInput] = useState("");
   const [voiceInput, setVoiceInput] = useState("");
@@ -548,6 +605,9 @@ export default function Home() {
   const [mediaFile, setMediaFile] = useState<File | null>(null);
   const [mediaUrl, setMediaUrl] = useState<string | null>(null);
   const [mediaExtracted, setMediaExtracted] = useState("");
+  const [mediaTranscriptNote, setMediaTranscriptNote] = useState(
+    "What the app extracted from the uploaded image or video before interpretation.",
+  );
   const [dragActive, setDragActive] = useState(false);
   const mediaKind = detectSource(mediaFile);
 
@@ -565,6 +625,7 @@ export default function Home() {
   const [dictOffensiveness, setDictOffensiveness] = useState(OFFENSIVENESS_OPTIONS[1]);
 
   const importRef = useRef<HTMLInputElement | null>(null);
+  const noticeTimerRef = useRef<number | null>(null);
 
   const recentDictionaryAdds = customEntries.filter((entry) => {
     return Date.now() - new Date(entry.createdAt).getTime() < 7 * 24 * 60 * 60 * 1000;
@@ -575,7 +636,14 @@ export default function Home() {
   const literalGloss = translation ? buildLiteralGloss(translation.original) : "";
   const culturalContext = translation ? buildCulturalContext(translation) : "";
   const englishEquivalent = translation ? buildEnglishEquivalent(translation) : null;
+  const similarIdiom = translation ? buildSimilarIdiom(translation) : null;
   const toneBreakdown = translation && emotion ? buildToneBreakdown(translation, emotion) : [];
+  const matchedCustomEntry =
+    translation?.matchedPhrases
+      .map((phrase) => customEntries.find((entry) => normalizeText(entry.slang) === normalizeText(phrase)))
+      .find(Boolean) ?? null;
+  const formalityLevel = translation ? buildFormalityLevel(translation, matchedCustomEntry) : null;
+  const offensivenessLevel = translation ? buildOffensivenessLevel(translation, matchedCustomEntry) : null;
   const transcriptMeta =
     analyzedSource === "voice"
       ? {
@@ -584,8 +652,8 @@ export default function Home() {
         }
       : analyzedSource === "media"
         ? {
-            label: "Media Transcription",
-            note: "What the app extracted from the uploaded image or video before interpretation.",
+            label: mediaKind === "video" ? "Video Transcription" : "Media Transcription",
+            note: mediaTranscriptNote,
           }
         : {
             label: "Text Transcription",
@@ -633,6 +701,44 @@ export default function Home() {
       if (mediaUrl) URL.revokeObjectURL(mediaUrl);
     };
   }, [mediaUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (noticeTimerRef.current) {
+        window.clearTimeout(noticeTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!error) return;
+
+    setNotice({ message: error, tone: "error" });
+    if (noticeTimerRef.current) {
+      window.clearTimeout(noticeTimerRef.current);
+    }
+
+    noticeTimerRef.current = window.setTimeout(() => {
+      setError(null);
+      setNotice(null);
+    }, 2000);
+
+    return () => {
+      if (noticeTimerRef.current) {
+        window.clearTimeout(noticeTimerRef.current);
+      }
+    };
+  }, [error]);
+
+  function flashNotice(message: string, tone: NoticeState["tone"] = "info") {
+    setNotice({ message, tone });
+    if (noticeTimerRef.current) {
+      window.clearTimeout(noticeTimerRef.current);
+    }
+    noticeTimerRef.current = window.setTimeout(() => {
+      setNotice(null);
+    }, 2000);
+  }
 
   function resolveCustomEntry(input: string) {
     const normalizedInput = normalizeText(input);
@@ -741,6 +847,9 @@ export default function Home() {
 
     recognition.onend = () => {
       setVoiceState((current) => (current === "recording" ? "done" : current));
+      if (voiceInput.trim()) {
+        flashNotice("Voice transcribed successfully.", "success");
+      }
     };
 
     recognitionRef.current = recognition;
@@ -752,11 +861,6 @@ export default function Home() {
   function loadMedia(file: File | null) {
     if (!file) return;
 
-    if (file.size > 30 * 1024 * 1024) {
-      setError("The file is larger than 30MB.");
-      return;
-    }
-
     const kind = detectSource(file);
     if (!kind) {
       setError("Upload an image or video only.");
@@ -766,6 +870,7 @@ export default function Home() {
     setError(null);
     setMediaFile(file);
     setMediaExtracted("");
+    setMediaTranscriptNote("What the app extracted from the uploaded image or video before interpretation.");
 
     setMediaUrl((current) => {
       if (current) URL.revokeObjectURL(current);
@@ -783,15 +888,20 @@ export default function Home() {
     setError(null);
 
     try {
-      const extracted = await extractTextFromFile(mediaFile);
-      if (!extracted.trim()) {
+      const transcript = await extractTranscriptFromMedia(mediaFile);
+      if (!transcript.text.trim()) {
         setError("I could not read clear text from the file. Try a clearer file.");
         setLoading(false);
         return;
       }
 
-      setMediaExtracted(extracted);
-      analyzeText(extracted, "media");
+      setMediaExtracted(transcript.text);
+      setMediaTranscriptNote(transcript.note);
+      flashNotice(
+        mediaKind === "video" ? "Video transcribed successfully." : "Image text extracted successfully.",
+        "success",
+      );
+      analyzeText(transcript.text, "media");
     } catch {
       setLoading(false);
       setError("Failed to analyze the file.");
@@ -821,6 +931,7 @@ export default function Home() {
     setDictFormality(FORMALITY_OPTIONS[1]);
     setDictOffensiveness(OFFENSIVENESS_OPTIONS[1]);
     setError(null);
+    flashNotice("Dictionary entry added successfully.", "success");
   }
 
   async function importDictionaryFile(file: File | null) {
@@ -848,6 +959,7 @@ export default function Home() {
       });
 
       setError(null);
+      flashNotice("Dataset imported successfully.", "success");
     } catch (issue) {
       setError(issue instanceof Error ? issue.message : "Failed to import file.");
     }
@@ -962,7 +1074,7 @@ export default function Home() {
                     onChange={(event) => setTextInput(event.target.value)}
                     dir="rtl"
                     rows={6}
-                    placeholder="Type Egyptian slang here in Arabic or Arabizi (e.g. يا اسطى, ya sosta)..."
+                    placeholder="Type Egyptian slang here in Arabic or Arabizi..."
                     className={`w-full resize-none rounded-2xl border px-5 py-4 text-[1.05rem] leading-8 outline-none transition ${
                       theme === "light"
                         ? "border-[#e6d8ca] bg-white text-[#5a4029] placeholder:text-[#9d7d61] focus:border-[#ffb25a] focus:ring-4 focus:ring-[#fff0dd]"
@@ -1061,15 +1173,17 @@ export default function Home() {
                         <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[#fff1e3] text-[#ff8a1d]">
                           <UploadIcon />
                         </div>
-                        <h3 className="mt-5 text-3xl font-black text-[#1f150f]">Upload Visual Slang</h3>
-                        <p className="mt-2 text-lg text-[#8d6b4c]">Drop an image or a short video and we will read the visible Arabic text.</p>
+                        <h3 className="mt-5 text-3xl font-black text-[#1f150f]">Upload Photo Or Video</h3>
+                        <p className="mt-2 text-lg text-[#8d6b4c]">Drop an image or video and we will transcribe the Egyptian Arabic before interpreting it.</p>
                       </>
                     )}
                   </div>
 
                   {mediaExtracted && (
                     <div className="mt-5 rounded-2xl border border-[#eadacc] bg-[#fffdfa] p-5">
-                      <div className="text-sm font-bold uppercase tracking-[0.18em] text-[#b28b68]">Extracted Text</div>
+                      <div className="text-sm font-bold uppercase tracking-[0.18em] text-[#b28b68]">
+                        {mediaKind === "video" ? "Media Transcription" : "Image Transcription"}
+                      </div>
                       <p className="mt-3 text-lg leading-8 text-[#5a4029]">{mediaExtracted}</p>
                     </div>
                   )}
@@ -1137,9 +1251,17 @@ export default function Home() {
               </div>
             </section>
 
-            {error && (
-              <div className="mx-auto mt-5 max-w-5xl rounded-2xl border border-[#f7c1bc] bg-[#fff0ee] px-5 py-4 text-base text-[#8c3a32]">
-                {error}
+            {notice && (
+              <div
+                className={`fixed right-5 top-5 z-50 rounded-2xl border px-4 py-3 text-sm font-semibold shadow-lg ${
+                  notice.tone === "success"
+                    ? "border-[#b9ebc9] bg-[#effcf2] text-[#17643a]"
+                    : notice.tone === "info"
+                      ? "border-[#d9c7b0] bg-[#fff7ed] text-[#7a5736]"
+                      : "border-[#f7c1bc] bg-[#fff0ee] text-[#8c3a32]"
+                }`}
+              >
+                {notice.message}
               </div>
             )}
 
@@ -1182,10 +1304,10 @@ export default function Home() {
                           <p className="mt-2 text-[2rem] font-black leading-tight text-[#21160f]">{translation.translation}</p>
                           <div className="mt-4 flex flex-wrap gap-2">
                             <span className="rounded-xl border border-[#9a4f1d] bg-[#3f2214] px-3 py-1.5 text-sm font-semibold text-[#ffd7b0]">
-                              Informal
+                              Formality {formalityLevel}
                             </span>
                             <span className="rounded-xl border border-[#1f774d] bg-[#133726] px-3 py-1.5 text-sm font-semibold text-[#b8f0d1]">
-                              {translation.tone === "ØºØ¶Ø¨" ? "Can Be Sharp" : "Not Offensive"}
+                              Offensive {offensivenessLevel}
                             </span>
                           </div>
                         </div>
@@ -1209,6 +1331,14 @@ export default function Home() {
                         <div className="text-sm font-bold uppercase tracking-[0.16em] text-[#ff5a5a]">English Equivalent</div>
                         <p className="mt-4 text-4xl font-black leading-tight text-white">{englishEquivalent.phrase}</p>
                         <p className="mt-3 text-lg leading-8 text-[#f5d2c8]">{englishEquivalent.note}</p>
+                      </div>
+                    )}
+
+                    {similarIdiom && (
+                      <div className="rounded-2xl border border-[#eadacc] bg-white p-5">
+                        <div className="text-sm font-bold uppercase tracking-[0.16em] text-[#b28b68]">Similar English Idiom</div>
+                        <p className="mt-4 text-3xl font-black leading-tight text-[#21160f]">{similarIdiom.phrase}</p>
+                        <p className="mt-3 text-lg leading-8 text-[#6f5540]">{similarIdiom.note}</p>
                       </div>
                     )}
 
@@ -1461,4 +1591,7 @@ export default function Home() {
     </main>
   );
 }
+
+
+
 
