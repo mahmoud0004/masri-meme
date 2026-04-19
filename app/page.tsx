@@ -37,7 +37,6 @@ const UI_COPY = {
   en: {
     langLabel: "Language",
     langSwitch: "العربية",
-    badge: "Studio for Egyptian Meme Intelligence",
     titleLead: "Egyptian Meme",
     titleAccent: "Translator",
     inputStudio: "Input Studio",
@@ -133,7 +132,6 @@ const UI_COPY = {
   ar: {
     langLabel: "اللغة",
     langSwitch: "English",
-    badge: "منصة ذكية لفهم الميمز المصرية",
     titleLead: "مترجم",
     titleAccent: "الميمز المصرية",
     inputStudio: "منطقة الإدخال",
@@ -546,11 +544,6 @@ export default function Home() {
           className="mb-8 rounded-[28px] border border-white/10 bg-white/[0.04] p-6 shadow-[0_20px_80px_rgba(0,0,0,0.35)] backdrop-blur-xl lg:p-8"
         >
           <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-            <div className="inline-flex items-center gap-2 rounded-full border border-[#14B8A6]/30 bg-[#14B8A6]/10 px-4 py-1.5 text-xs font-bold text-[#99F6E4]">
-              <span className="h-2 w-2 rounded-full bg-[#5EEAD4]" />
-              {copy.badge}
-            </div>
-
             <button
               onClick={toggleLanguage}
               className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white/80 transition hover:bg-white/10"
