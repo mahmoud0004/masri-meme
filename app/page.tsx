@@ -46,8 +46,7 @@ const UI_COPY = {
     tabVoice: "Voice",
     tabMedia: "Image / Video",
     writeAnything: "WRITE ANYTHING",
-    textPlaceholder:
-      'Example: "أنا مخنوق من الشغل النهارده"\nOr: "إيه اللي بيحصل ده؟"\nOr: "يا روح قلبي وحشتني"',
+    textPlaceholder: "Enter phrase here",
     clear: "Clear",
     analyze: "Analyze Meaning",
     voiceBody: "Speak in Egyptian Arabic and the app will convert the speech into text, then interpret it.",
@@ -143,8 +142,7 @@ const UI_COPY = {
     tabVoice: "صوت",
     tabMedia: "صورة / فيديو",
     writeAnything: "اكتب أي شيء",
-    textPlaceholder:
-      'مثال: "أنا مخنوق من الشغل النهارده"\nأو: "إيه اللي بيحصل ده؟"\nأو: "يا روح قلبي وحشتني"',
+    textPlaceholder: "اكتب العبارة هنا",
     clear: "مسح",
     analyze: "حلّل المعنى",
     voiceBody: "اتكلم بالمصري، وسيتم تحويل الكلام إلى نص ثم تفسيره.",
