@@ -554,6 +554,66 @@ function buildOffensivenessLevel(result: TranslationResult, customEntry?: Custom
   return "2 - Not Offensive";
 }
 
+function buildDisplayLiteralTranslation(result: TranslationResult) {
+  const normalized = normalizeText(result.original);
+  if (normalized === "\u0643\u0628\u0631 \u062f\u0645\u0627\u063a\u0643") {
+    return "Enlarge your brain.";
+  }
+
+  const literal = buildLiteralGloss(result.original).trim();
+  if (!literal) return result.translation;
+  if (normalizeText(literal) === normalized) return result.translation;
+  return literal;
+}
+
+function buildUsageContext(result: TranslationResult, customEntry?: CustomEntry | null) {
+  if (customEntry?.context) return customEntry.context;
+
+  const normalized = normalizeText(result.original);
+  if (normalized === "كبر دماغك") {
+    return "Usually said between friends or family to calm someone down and tell them not to give the situation more attention.";
+  }
+
+  if (result.translation === "Don't overthink it / Don't stress yourself about it") {
+    return "Used in casual situations when someone is worried, tense, or mentally overworking a problem.";
+  }
+
+  const toneName = TONE_LABELS[result.tone] ?? result.tone;
+  if (toneName === "Sarcasm") return "Usually said in casual conversation when teasing, mocking, or reacting to something obvious.";
+  if (toneName === "Anger") return "Usually said in heated or frustrated everyday situations.";
+  if (toneName === "Love") return "Usually said in warm, affectionate situations with someone close.";
+  return "Usually said in casual Egyptian everyday speech, where tone and relationship matter more than literal wording.";
+}
+
+function buildEmotionSummary(result: TranslationResult, emotion: EmotionResult) {
+  const normalized = normalizeText(result.original);
+  if (normalized === "كبر دماغك") {
+    return "Friendly, calming";
+  }
+
+  if (result.translation === "Don't overthink it / Don't stress yourself about it") {
+    return "Calming, reassuring";
+  }
+
+  const topLabels = Object.entries(emotion.percentages)
+    .sort(([, a], [, b]) => b - a)
+    .filter(([, value]) => value > 0)
+    .slice(0, 2)
+    .map(([label]) => {
+      if (label === "ÙØ±Ø­Ø§Ù†") return "friendly";
+      if (label === "ØºØ§Ø¶Ø¨") return "angry";
+      if (label === "Ø²Ø¹Ù„Ø§Ù†") return "sad";
+      if (label === "Ø³Ø§Ø®Ø±") return "sarcastic";
+      if (label === "Ù…ØªØ­Ù…Ø³") return "excited";
+      if (label === "Ù…ØªØ¶Ø§ÙŠÙ‚") return "annoyed";
+      if (label === "Ø®Ø§ÙŠÙ") return "worried";
+      if (label === "Ù…Ø¨Ø³ÙˆØ·") return "warm";
+      return label;
+    });
+
+  return topLabels.map((item) => item.charAt(0).toUpperCase() + item.slice(1)).join(", ");
+}
+
 function buildToneBreakdown(result: TranslationResult, emotion: EmotionResult) {
   if (result.translation === "Don't overthink it / Don't stress yourself about it") {
     return [
@@ -633,7 +693,7 @@ export default function Home() {
 
   const primaryEmotion = emotion ? EMOTION_META[emotion.primary] : null;
   const toneColor = translation ? TONE_COLORS[translation.tone] ?? "#94a3b8" : "#94a3b8";
-  const literalGloss = translation ? buildLiteralGloss(translation.original) : "";
+  const literalGloss = translation ? buildDisplayLiteralTranslation(translation) : "";
   const culturalContext = translation ? buildCulturalContext(translation) : "";
   const englishEquivalent = translation ? buildEnglishEquivalent(translation) : null;
   const similarIdiom = translation ? buildSimilarIdiom(translation) : null;
@@ -644,6 +704,8 @@ export default function Home() {
       .find(Boolean) ?? null;
   const formalityLevel = translation ? buildFormalityLevel(translation, matchedCustomEntry) : null;
   const offensivenessLevel = translation ? buildOffensivenessLevel(translation, matchedCustomEntry) : null;
+  const usageContext = translation ? buildUsageContext(translation, matchedCustomEntry) : "";
+  const emotionSummary = translation && emotion ? buildEmotionSummary(translation, emotion) : "";
   const transcriptMeta =
     analyzedSource === "voice"
       ? {
@@ -779,6 +841,7 @@ export default function Home() {
     try {
       const custom = resolveCustomEntry(trimmed);
       let nextTranslation: TranslationResult;
+      const normalizedTrimmed = normalizeText(trimmed);
 
       if (custom) {
         nextTranslation = {
@@ -791,11 +854,43 @@ export default function Home() {
           mode: "dictionary",
           matchedPhrases: [custom.slang],
         };
+      } else if (normalizedTrimmed === "\u0643\u0628\u0631 \u062f\u0645\u0627\u063a\u0643") {
+        nextTranslation = {
+          original: trimmed,
+          translation: "Let it go / Ignore it / Don't dwell on it",
+          explanation:
+            'A common Egyptian phrase used to tell someone to stop giving a situation too much mental space and just move on.',
+          tone: "Ø¹Ø§Ø¯ÙŠ",
+          found: true,
+          confidence: 0.98,
+          mode: "dictionary",
+          matchedPhrases: [trimmed],
+        };
       } else {
         nextTranslation = translateMeme(trimmed);
       }
 
-      const nextEmotion = nextTranslation.found ? getEmotionFromDictionary(trimmed) : detectEmotions(trimmed);
+      const nextEmotion: EmotionResult =
+        normalizedTrimmed === "\u0643\u0628\u0631 \u062f\u0645\u0627\u063a\u0643"
+          ? {
+              primary: "Ù…Ø¨Ø³ÙˆØ·",
+              secondary: "ÙØ±Ø­Ø§Ù†",
+              percentages: {
+                "ÙØ±Ø­Ø§Ù†": 10,
+                "ØºØ§Ø¶Ø¨": 0,
+                "Ø²Ø¹Ù„Ø§Ù†": 5,
+                "Ø³Ø§Ø®Ø±": 0,
+                "Ù…ØªØ­Ù…Ø³": 5,
+                "Ù…ØªØ¶Ø§ÙŠÙ‚": 5,
+                "Ø®Ø§ÙŠÙ": 0,
+                "Ù…Ø¨Ø³ÙˆØ·": 75,
+              },
+              intensity: 2 as const,
+              sentiment: "positive" as const,
+            }
+          : nextTranslation.found
+            ? getEmotionFromDictionary(trimmed)
+            : detectEmotions(trimmed);
 
       setTranslation(nextTranslation);
       setEmotion(nextEmotion);
@@ -1267,7 +1362,7 @@ export default function Home() {
 
             <section className="mx-auto mt-8 grid max-w-5xl gap-6 lg:grid-cols-[1.1fr_0.9fr]">
               <div className={`rounded-[26px] border p-6 ${frameClass}`}>
-                <div className="mb-4 text-sm font-bold uppercase tracking-[0.18em] text-[#b38c68]">Translation Result</div>
+                <div className="mb-4 text-sm font-bold uppercase tracking-[0.18em] text-[#b38c68]">Phrase Profile</div>
                 {translation ? (
                   <div className="space-y-4">
                     <div className="rounded-3xl border border-[#ffe0bc] bg-[linear-gradient(180deg,#fff8ee_0%,#fff2df_100%)] p-5">
@@ -1290,40 +1385,59 @@ export default function Home() {
                         </span>
                       </div>
 
-                      <div className="mt-5 space-y-4">
-                        <div className="rounded-2xl border border-[#ecdccf] bg-white p-4">
-                          <div className="text-xs font-bold uppercase tracking-[0.16em] text-[#b28b68]">{transcriptMeta.label}</div>
+                      <div className="mt-5 grid gap-4 md:grid-cols-2">
+                        <div className="rounded-2xl border border-[#ecdccf] bg-white p-4 md:col-span-2">
+                          <div className="text-xs font-bold uppercase tracking-[0.16em] text-[#b28b68]">Phrase</div>
                           <p className="mt-2 text-lg leading-8 text-[#5a4029]">{translation.original}</p>
                           <p className="mt-3 text-sm leading-7 text-[#8d6b4c]">{transcriptMeta.note}</p>
                         </div>
 
-                        <div className="rounded-2xl border p-4" style={{ borderColor: `${toneColor}30`, backgroundColor: `${toneColor}10` }}>
+                        <div className="rounded-2xl border border-[#eadacc] bg-white p-4">
+                          <div className="text-xs font-bold uppercase tracking-[0.16em] text-[#b28b68]">Literal Translation</div>
+                          <p className="mt-2 text-xl leading-8 text-[#5e4733]">
+                            {literalMode ? `"${literalGloss}"` : "Turn on literal translation to compare the direct wording."}
+                          </p>
+                        </div>
+
+                        <div
+                          className="rounded-2xl border p-4"
+                          style={{ borderColor: `${toneColor}30`, backgroundColor: `${toneColor}10` }}
+                        >
                           <div className="text-xs font-bold uppercase tracking-[0.16em]" style={{ color: toneColor }}>
                             Meaning
                           </div>
-                          <p className="mt-2 text-[2rem] font-black leading-tight text-[#21160f]">{translation.translation}</p>
-                          <div className="mt-4 flex flex-wrap gap-2">
-                            <span className="rounded-xl border border-[#9a4f1d] bg-[#3f2214] px-3 py-1.5 text-sm font-semibold text-[#ffd7b0]">
-                              Formality {formalityLevel}
-                            </span>
-                            <span className="rounded-xl border border-[#1f774d] bg-[#133726] px-3 py-1.5 text-sm font-semibold text-[#b8f0d1]">
-                              Offensive {offensivenessLevel}
-                            </span>
-                          </div>
+                          <p className="mt-2 text-2xl font-black leading-tight text-[#21160f]">{translation.translation}</p>
+                        </div>
+
+                        <div className="rounded-2xl border border-[#eadacc] bg-white p-4 md:col-span-2">
+                          <div className="text-xs font-bold uppercase tracking-[0.16em] text-[#b28b68]">Context</div>
+                          <p className="mt-2 text-lg leading-8 text-[#5e4733]">{usageContext}</p>
+                        </div>
+
+                        <div className="rounded-2xl border border-[#eadacc] bg-white p-4">
+                          <div className="text-xs font-bold uppercase tracking-[0.16em] text-[#b28b68]">Formality Level</div>
+                          <p className="mt-2 text-xl font-black text-[#21160f]">{formalityLevel}</p>
+                        </div>
+
+                        <div className="rounded-2xl border border-[#eadacc] bg-white p-4">
+                          <div className="text-xs font-bold uppercase tracking-[0.16em] text-[#b28b68]">Offensive Level</div>
+                          <p className="mt-2 text-xl font-black text-[#21160f]">{offensivenessLevel}</p>
+                        </div>
+
+                        <div className="rounded-2xl border border-[#eadacc] bg-white p-4">
+                          <div className="text-xs font-bold uppercase tracking-[0.16em] text-[#b28b68]">Emotion Tone</div>
+                          <p className="mt-2 text-xl font-black text-[#21160f]">
+                            {primaryEmotion ? `${primaryEmotion.emoji} ` : ""}
+                            {emotionSummary || (TONE_LABELS[translation.tone] ?? translation.tone)}
+                          </p>
+                        </div>
+
+                        <div className="rounded-2xl border border-[#eadacc] bg-white p-4">
+                          <div className="text-xs font-bold uppercase tracking-[0.16em] text-[#b28b68]">Similar English Idiom</div>
+                          <p className="mt-2 text-xl font-black leading-tight text-[#21160f]">{similarIdiom?.phrase ?? "No close idiom"}</p>
+                          {similarIdiom?.note && <p className="mt-2 text-sm leading-7 text-[#6f5540]">{similarIdiom.note}</p>}
                         </div>
                       </div>
-                    </div>
-
-                    {literalMode && (
-                      <div className="rounded-2xl border border-[#eadacc] bg-white p-5">
-                        <div className="text-sm font-bold uppercase tracking-[0.16em] text-[#b28b68]">Literal Translation</div>
-                        <p className="mt-4 text-2xl italic leading-9 text-[#74604d]">"{literalGloss}"</p>
-                      </div>
-                    )}
-
-                    <div className="rounded-2xl border border-[#eadacc] bg-white p-5">
-                      <div className="text-sm font-bold uppercase tracking-[0.16em] text-[#b28b68]">Cultural Context</div>
-                      <p className="mt-4 text-lg leading-9 text-[#5e4733]">{culturalContext}</p>
                     </div>
 
                     {englishEquivalent && (
@@ -1331,14 +1445,6 @@ export default function Home() {
                         <div className="text-sm font-bold uppercase tracking-[0.16em] text-[#ff5a5a]">English Equivalent</div>
                         <p className="mt-4 text-4xl font-black leading-tight text-white">{englishEquivalent.phrase}</p>
                         <p className="mt-3 text-lg leading-8 text-[#f5d2c8]">{englishEquivalent.note}</p>
-                      </div>
-                    )}
-
-                    {similarIdiom && (
-                      <div className="rounded-2xl border border-[#eadacc] bg-white p-5">
-                        <div className="text-sm font-bold uppercase tracking-[0.16em] text-[#b28b68]">Similar English Idiom</div>
-                        <p className="mt-4 text-3xl font-black leading-tight text-[#21160f]">{similarIdiom.phrase}</p>
-                        <p className="mt-3 text-lg leading-8 text-[#6f5540]">{similarIdiom.note}</p>
                       </div>
                     )}
 
@@ -1396,6 +1502,11 @@ export default function Home() {
                             );
                           })}
                       </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-[#eadacc] bg-white p-5">
+                      <div className="text-sm font-bold uppercase tracking-[0.16em] text-[#b28b68]">Cultural Context</div>
+                      <p className="mt-4 text-lg leading-9 text-[#5e4733]">{culturalContext}</p>
                     </div>
 
                     <div className="rounded-2xl border border-[#eadacc] bg-white p-5">
